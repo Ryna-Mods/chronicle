@@ -3,8 +3,8 @@
 --
 -- onLogin, which the core runs at PLAYER_LOGIN once RynaDB is set up and the journal session has
 -- started, does only the cheap part (identity, level, gold, the session event). The heavier scans
--- (gear, professions, reputations, talents, bags, quests, the guild roster) and the played time
--- request are deferred a few seconds past the first PLAYER_ENTERING_WORLD.
+-- (gear, professions, reputations, talents, bags, quests, the character sheet, the guild roster)
+-- and the played time request are deferred a few seconds past the first PLAYER_ENTERING_WORLD.
 
 local _, ns = ...
 if ns.off then return end
@@ -60,6 +60,7 @@ ns.On("PLAYER_ENTERING_WORLD", function()
     ns.Quests.RefreshCompleted()
   end)
   ns.After(6, "group-scan", ns.Sightings.ScanGroup)
+  ns.After(7, "sheet-scan", ns.Sheet.ScanAll) -- the character sheet: talents, spells, stats, ... (Sheet.lua)
   ns.After(8, "roster-request", function()
     ns.Guild.Request()
     ns.Guild.StartTicker()

@@ -14,6 +14,7 @@ local function changed()
   C.version = C.version + 1
   if ns.Window and ns.Window.Changed then ns.Window.Changed() end
 end
+C.Changed = changed -- for the sheet's scans (Sheet.lua)
 
 local NonEmpty = ns.NonEmpty
 local GENDER = { [2] = "male", [3] = "female" }
@@ -135,6 +136,16 @@ function C.Login()
     zonesBackfill = type(prev.zonesBackfill) == "table" and prev.zonesBackfill or nil,
     places = type(prev.places) == "table" and prev.places or {},
     placesSince = prev.placesSince,
+    -- The character sheet (Sheet.lua, docs/wow.md 19.1): kept from the last session until read again.
+    specs = type(prev.specs) == "table" and prev.specs or nil,
+    spells = type(prev.spells) == "table" and prev.spells or nil,
+    trainer = type(prev.trainer) == "table" and prev.trainer or nil,
+    stats = type(prev.stats) == "table" and prev.stats or nil,
+    skills = type(prev.skills) == "table" and prev.skills or nil,
+    currencies = type(prev.currencies) == "table" and prev.currencies or nil,
+    restedXp = type(prev.restedXp) == "number" and prev.restedXp or nil,
+    hearth = type(prev.hearth) == "string" and prev.hearth or nil,
+    pvp = type(prev.pvp) == "table" and prev.pvp or nil,
   }
   if type(rec.quests.active) ~= "table" then rec.quests.active = {} end
   if type(rec.quests.completed) ~= "table" then rec.quests.completed = {} end
@@ -173,7 +184,7 @@ function C.UpdateGuild()
   changed()
 end
 
--- Gear: slots 0 (ammo) to 19 (tabard).
+-- Gear: slots 0 (ammo) to 19 (tabard), each with its durability when it has one (Sheet.lua).
 function C.ScanGear()
   local rec = ns.rec
   if not rec then return end
@@ -188,6 +199,10 @@ function C.ScanGear()
         quality = ns.Try(ns.Fn("GetInventoryItemQuality"), "player", slot),
         enchant = enchant,
       }
+      if ns.Sheet then
+        local row = gear[#gear]
+        row.dur, row.durMax = ns.Sheet.Durability(slot)
+      end
     end
   end
   rec.gear = gear

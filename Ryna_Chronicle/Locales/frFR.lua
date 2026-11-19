@@ -418,3 +418,71 @@ L["From your saved file: bags as of each character's last login, the bank as of 
 L["never: open the bank once"] = nil
 L["Bags as they are now; the bank as of your last visit (%s)."] = nil
 L["From your saved file: %s's bags as of %s, the bank as of %s."] = nil
+-- One character's sheet (the detail's picker: Character, Talents, Spells, Stats, Quests). Talents: a spec's
+-- heading ("Spec 1 (active)", "Spec 2"), joined to a tree's ("Spec 1 (active) · Discipline · 14 points"); a
+-- talent with no name saved, "spell 14521"; the columns; a tree with none taken; the record's talent text
+-- before the sheet was recorded, and the line under it; a character whose sheet isn't recorded yet.
+L["Spells"] = nil
+L["Stats"] = nil
+L["Spec %s (active)"] = nil
+L["Spec %s"] = nil
+L["%s · %s points"] = nil
+L["%s · %s"] = nil
+L["No talents taken."] = nil
+L["spell %s"] = nil
+L["Talent"] = nil
+L["Rank"] = nil
+L["Each talent shows once this character logs in with this version of Chronicle."] = nil
+L["Not recorded yet: log in on this character to read its sheet."] = nil
+-- Spells: a spell's rank column when it has no rank but is passive; the trainer's group, "At the trainer:
+-- Brother Joshua, 2 days ago" (who, how long ago), or "the class trainer" when its name wasn't saved; the
+-- trainer's group with nothing left to learn, or never visited; the columns (a spell or service, its rank,
+-- the level it's learned at, its cost).
+L["Passive"] = nil
+L["At the trainer"] = nil
+L["At the trainer: %s, %s"] = nil
+L["the class trainer"] = nil
+L["Nothing left to learn there on that visit."] = nil
+L["Visit your class trainer to see what you can learn next."] = nil
+L["Spell"] = nil
+L["Cost"] = nil
+-- Stats: the character frame's stats ("Fire resistance", "Fire spell damage"; a percentage "6.4%"; mana
+-- regen "21 per 5 s", per five seconds), then the groups after them, and durability's "lowest: Linen Boots".
+L["Strength"] = nil
+L["Agility"] = nil
+L["Stamina"] = nil
+L["Intellect"] = nil
+L["Spirit"] = nil
+L["Holy"] = nil
+L["Fire"] = nil
+L["Nature"] = nil
+L["Frost"] = nil
+L["Shadow"] = nil
+L["Arcane"] = nil
+L["Power"] = nil
+L["Health"] = nil
+L["Armor"] = nil
+L["%s resistance"] = nil
+L["Attack power"] = nil
+L["Ranged attack power"] = nil
+L["%s spell damage"] = nil
+L["Healing"] = nil
+L["Melee crit"] = nil
+L["Ranged crit"] = nil
+L["Spell crit"] = nil
+L["Dodge"] = nil
+L["Parry"] = nil
+L["Block"] = nil
+L["%s%%"] = nil
+L["Mana regen (casting)"] = nil
+L["Mana regen (not casting)"] = nil
+L["%s per 5 s"] = nil
+L["Not recorded yet: stats are read out of combat, on this character."] = nil
+L["Skills"] = nil
+L["Currencies"] = nil
+L["Other"] = nil
+L["Rested experience"] = nil
+L["Hearthstone"] = nil
+L["Honorable kills"] = nil
+L["Durability"] = nil
+L["lowest: %s"] = nil

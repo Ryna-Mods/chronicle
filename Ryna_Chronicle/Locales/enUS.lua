@@ -410,3 +410,71 @@ L["From your saved file: bags as of each character's last login, the bank as of 
 L["never: open the bank once"] = true
 L["Bags as they are now; the bank as of your last visit (%s)."] = true
 L["From your saved file: %s's bags as of %s, the bank as of %s."] = true
+-- One character's sheet (the detail's picker: Character, Talents, Spells, Stats, Quests). Talents: a spec's
+-- heading ("Spec 1 (active)", "Spec 2"), joined to a tree's ("Spec 1 (active) · Discipline · 14 points"); a
+-- talent with no name saved, "spell 14521"; the columns; a tree with none taken; the record's talent text
+-- before the sheet was recorded, and the line under it; a character whose sheet isn't recorded yet.
+L["Spells"] = true
+L["Stats"] = true
+L["Spec %s (active)"] = true
+L["Spec %s"] = true
+L["%s · %s points"] = true
+L["%s · %s"] = true
+L["No talents taken."] = true
+L["spell %s"] = true
+L["Talent"] = true
+L["Rank"] = true
+L["Each talent shows once this character logs in with this version of Chronicle."] = true
+L["Not recorded yet: log in on this character to read its sheet."] = true
+-- Spells: a spell's rank column when it has no rank but is passive; the trainer's group, "At the trainer:
+-- Brother Joshua, 2 days ago" (who, how long ago), or "the class trainer" when its name wasn't saved; the
+-- trainer's group with nothing left to learn, or never visited; the columns (a spell or service, its rank,
+-- the level it's learned at, its cost).
+L["Passive"] = true
+L["At the trainer"] = true
+L["At the trainer: %s, %s"] = true
+L["the class trainer"] = true
+L["Nothing left to learn there on that visit."] = true
+L["Visit your class trainer to see what you can learn next."] = true
+L["Spell"] = true
+L["Cost"] = true
+-- Stats: the character frame's stats ("Fire resistance", "Fire spell damage"; a percentage "6.4%"; mana
+-- regen "21 per 5 s", per five seconds), then the groups after them, and durability's "lowest: Linen Boots".
+L["Strength"] = true
+L["Agility"] = true
+L["Stamina"] = true
+L["Intellect"] = true
+L["Spirit"] = true
+L["Holy"] = true
+L["Fire"] = true
+L["Nature"] = true
+L["Frost"] = true
+L["Shadow"] = true
+L["Arcane"] = true
+L["Power"] = true
+L["Health"] = true
+L["Armor"] = true
+L["%s resistance"] = true
+L["Attack power"] = true
+L["Ranged attack power"] = true
+L["%s spell damage"] = true
+L["Healing"] = true
+L["Melee crit"] = true
+L["Ranged crit"] = true
+L["Spell crit"] = true
+L["Dodge"] = true
+L["Parry"] = true
+L["Block"] = true
+L["%s%%"] = true
+L["Mana regen (casting)"] = true
+L["Mana regen (not casting)"] = true
+L["%s per 5 s"] = true
+L["Not recorded yet: stats are read out of combat, on this character."] = true
+L["Skills"] = true
+L["Currencies"] = true
+L["Other"] = true
+L["Rested experience"] = true
+L["Hearthstone"] = true
+L["Honorable kills"] = true
+L["Durability"] = true
+L["lowest: %s"] = true
