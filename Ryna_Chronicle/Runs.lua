@@ -1064,8 +1064,10 @@ end
 -- /ryna runs forget (Dungeons.lua asks twice before calling this). Only this character's closed runs
 -- in the saved file: the open run stays, and what ryna.io already has stays there.
 --
---   "split"  the runs addon 0.7.0 cut one visit into: every run of a chain in which one run of a map
---            starts within a second of the last one's end (two or more in a row)
+--   "split"  the pieces addon 0.7.0 cut off one visit: a run that the next run of the same map starts
+--            within a second of the end of. The last run of such a chain wasn't cut off (it is the
+--            rest of the visit, and ended as a run does), so it stays: the first use of this in game
+--            took a real 35-minute run with it (2026-11-21).
 --   "all"    every closed run, and the totals of the runs folded out of the list
 
 -- The indexes (into `list`, oldest first as stored) of the runs "split" would forget.
@@ -1080,7 +1082,7 @@ local function splitIndexes(list)
     local before, after = list[order[k - 1]], list[order[k]]
     local gap = after.enteredAt - n0(before.leftAt)
     if before.mapId == after.mapId and type(before.leftAt) == "number" and gap >= 0 and gap <= 1 then
-      marked[order[k - 1]], marked[order[k]] = true, true
+      marked[order[k - 1]] = true
     end
   end
   return marked

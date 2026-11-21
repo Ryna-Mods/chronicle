@@ -129,7 +129,7 @@ local function forget(what)
   local R = ns.Runs
   if what ~= "split" and what ~= "all" then
     asked = nil
-    ns.Print(L["/ryna runs forget split: the runs one visit was cut into by an old version; "
+    ns.Print(L["/ryna runs forget split: the pieces an old version cut off a visit (its last part stays); "
       .. "/ryna runs forget all: every saved run of this character"])
     return
   end

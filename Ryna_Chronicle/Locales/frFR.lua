@@ -512,7 +512,7 @@ L["The example run is gone."] = nil
 L["The run display can't be drawn on this client."] = nil
 L["/ryna runs: your dungeon runs; /ryna runs strip, card or off: the live display; "
   .. "/ryna runs test: place it; /ryna runs forget split or all: forget saved runs"] = nil
-L["/ryna runs forget split: the runs one visit was cut into by an old version; "
+L["/ryna runs forget split: the pieces an old version cut off a visit (its last part stays); "
   .. "/ryna runs forget all: every saved run of this character"] = nil
 L["No run here looks like part of a visit that was cut up."] = nil
 L["This character has no saved runs."] = nil
