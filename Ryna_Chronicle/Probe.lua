@@ -128,7 +128,10 @@ local function onEvent(_, event, ...)
   if event == "PLAYER_REGEN_DISABLED" then
     if fights >= FIGHTS then return end
     fights = fights + 1
-    P.Now(string.format("fight %d of %d", fights, FIGHTS))
+    -- A moment in, not at the event: InCombatLockdown is still false inside this handler, and what
+    -- combat hides may not be hidden yet (seen 2026-11-20).
+    local label = string.format("fight %d of %d", fights, FIGHTS)
+    ns.After(2, "probe", function() P.Now(label) end)
   elseif event == "CHAT_MSG_SYSTEM" then
     local msg = ...
     if not ns.IsSecret(msg) and isReset(msg) then say("reset line: " .. msg) end

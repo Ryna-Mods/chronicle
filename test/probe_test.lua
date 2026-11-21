@@ -49,6 +49,7 @@ _G.Ryna = {
   IsSecret = function(v) return v == SECRET end,
   Print = function(m) chat[#chat + 1] = m end,
   Run = run,
+  After = function(_, label, fn) C_Timer.After(0, function() run(label, fn) end) end,
   On = function(event, f)
     handlers[event] = handlers[event] or {}
     table.insert(handlers[event], f)
@@ -150,6 +151,8 @@ check(#chat == 1, "a hidden system line is ignored")
 
 chat = {}
 for _ = 1, 5 do F.Fire("PLAYER_REGEN_DISABLED") end
+check(#chat == 0, "the fight reading waits a moment, since combat's rules aren't in force at the event")
+F.RunTimers()
 local readings = 0
 for _, line in ipairs(chat) do
   if line:find("fight %d of 3") then readings = readings + 1 end
