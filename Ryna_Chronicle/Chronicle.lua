@@ -408,11 +408,13 @@ function Ch.OnXpMessage(text)
     local e = id and ns.rec and type(ns.rec.kills) == "table" and ns.rec.kills[id]
     if type(e) == "table" then e.xp = num(e.xp) + xp end
     if ns.Session then ns.Session.Kill(id, name, xp, 0) end
+    if ns.Runs then ns.Runs.Kill(0, xp) end -- the open dungeon run (Runs.lua)
     Ch.killsVersion = Ch.killsVersion + 1
     ns.Debug("chronicle: %s's experience line, the kill already counted from the target", name)
     return
   end
   mark(name, "xp")
+  if ns.Runs then ns.Runs.Kill(1, xp) end
   if id then
     addKill(id, name, xp, 1, own)
     return
@@ -492,6 +494,7 @@ function Ch.CheckTarget()
     return false
   end
   mark(name, "target")
+  if ns.Runs then ns.Runs.Kill(1, 0, guid) end
   addKill(id, name, 0, 1, solo())
   return true
 end
@@ -556,6 +559,7 @@ end
 -- the first (the slot's source) is returned.
 local function countSources(guid, _, ...)
   if guid == nil then return nil end
+  if ns.Runs then ns.Runs.Source(guid) end -- the run's instance copy and its creatures (Runs.lua)
   countSource(guid)
   if select("#", ...) > 0 then countSources(...) end
   return guid
@@ -636,6 +640,7 @@ function Ch.OnSlotCleared(i)
   addZone(e, s.zone, 1, s.quantity)
   Ch.lootVersion = (Ch.lootVersion or 0) + 1
   if ns.Session then ns.Session.Loot(s.quantity) end
+  if ns.Runs then ns.Runs.Loot(s.itemId, s.quantity, s.quality) end
   ns.Debug("chronicle: looted %s x%d from %s, %d in all", s.name or s.itemId, s.quantity, s.source, e.n)
 end
 
