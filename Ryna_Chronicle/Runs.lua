@@ -40,6 +40,8 @@
 --                         A run that didn't kill every boss it started is never a fastest.
 --   Runs.Display()        the runDisplay setting: "strip", "card" or "off"
 --   Runs.Full(run)        whether a run killed every boss it pulled (and at least one)
+--   Runs.CurrentTop()     the open run's most valuable drops so far, priced now (as a closed run's
+--                         loot.top), for the summary on leaving
 --
 -- Settings: runs (on), runSummary (on), runSummaryMeter (on), runDisplay ("off"; the core's
 -- AddDefaults takes booleans only, so Runs.Display() reads it with "off" as its default).
@@ -72,8 +74,12 @@ R.version = 0
 ns.API.Settings.AddDefaults({ runs = true, runSummary = true, runSummaryMeter = true })
 
 local DISPLAYS = { strip = true, card = true, off = true }
+-- Read from the settings table itself: the core's Settings.Get answers booleans only (anything else
+-- reads as its default, which runDisplay has none of).
 function R.Display()
-  local v = ns.Setting("runDisplay")
+  local all = ns.API.Settings.All and ns.API.Settings.All()
+  local v = type(all) == "table" and all.runDisplay or nil
+  if v == nil then v = ns.Setting("runDisplay") end
   if not ns.IsSecret(v) and type(v) == "string" and DISPLAYS[v] then return v end
   return "off"
 end
@@ -1042,6 +1048,15 @@ function R.Current()
   view.pulling = run.pull and copy(run.pull) or nil
   view.full = R.Full(view)
   return view
+end
+
+-- The open run's most valuable drops so far, priced now ({ id, qty, vendor, auction }, at most ten,
+-- most first), for the summary shown on leaving; {} with no open run. Read only.
+function R.CurrentTop()
+  local run = openRun()
+  if not run then return {} end
+  local _, _, top = priced(run)
+  return top
 end
 
 -- Closed runs, newest first.

@@ -34,8 +34,12 @@ ns.API.RegisterMod({
     ns.Character.Logout()
     ns.Session.Save()
   end,
-  -- The panel's Defaults: the strip shows and unlocks again, in the place it had.
-  onDefaults = function() ns.Strip.OnDefaults() end,
+  -- The panel's Defaults: the strip shows and unlocks again, in the place it had; the run display
+  -- follows the settings again.
+  onDefaults = function()
+    ns.Strip.OnDefaults()
+    ns.RunDisplay.OnDefaults()
+  end,
 })
 
 local deferred = false
