@@ -1,6 +1,6 @@
 -- Dungeon runs (Runs.lua) against a fake client: open, pause, resume and every way a run closes;
 -- time inside against time outside; a /reload and a login mid-run; the instance copy learned from a
--- looted corpse and another copy starting a new run; a boss pulled again; a wipe then a kill; experience
+-- looted corpse, another copy id and a boss pulled again never ending a run; a wipe then a kill; experience
 -- across a level-up; the coin line in both formats and one that can't be read; secrets skipped; the
 -- meter; the journal event's shape; the 100-run cap folding into totals; Compare never taking a partial
 -- run as the fastest; and `runs` off. From the repository root, with Lua 5.1 (what the game runs) or later:
@@ -417,11 +417,20 @@ fire("PLAYER_REGEN_ENABLED")
 F.RunTimers()
 check(R.Current().meter.damage == 41100, "a fight after the reload is counted, the ones before aren't again")
 
--- The repeated-boss rule: the boss this run killed pulled again is a new copy. ----------------------
+-- A corpse with another copy id: counted, and the run goes on (seen in game 2026-11-21: the id isn't
+-- the same for every creature of one copy, and a run must never start over at a loot window). -------
 local firstId = cur.id
+loot("Creature-0-8452-48-9900000-4811-1C5DBBE381", {})
+loot("Creature-0-8452-48-9900000-4812-1C5DBBE382", {})
+check(#events() == 0 and R.Current().id == firstId, "a corpse of another copy id doesn't end the run")
+check(R.Current().copy == 8801871 and R.Current().otherCopies["9900000"] == 2,
+  "the first id stays, the other is counted")
+
+-- The reset line while outside closes it, at the moment the character walked out. -------------------
 now = now + 10
-fire("ENCOUNTER_START", 2916, "Ghamoo-ra", 1, 5)
-check(#events() == 1, "the old run closes")
+leave()
+fire("CHAT_MSG_SYSTEM", "Blackfathom Deeps has been reset.")
+check(#events() == 1, "the run closes")
 local e = lastEvent()
 check(e.id == firstId and e.mapId == 48 and e.instance == "Blackfathom Deeps" and e.kind == "party",
   "the event names the run")
@@ -442,18 +451,28 @@ check(e.durability.lost == 10 and e.durability.of == 220 and e.deaths == 1 and e
 check(e.rep["72"] == 250 and e.meter.damage == 41100 and e.party.members[1].guid == "Player-91-00B3E9D1",
   "rep, meter, party")
 check(runs().list[1].bosses[2].split ~= nil and runs().list[1].at == nil, "the kept copy has the splits")
-cur = R.Current()
-check(cur and cur.id ~= firstId and cur.pulling and cur.pulling.encounterId == 2916 and cur.copy == nil,
-  "a new run opens with the pull under way")
+check(lastEvent().otherCopies["9900000"] == 2, "the event carries the other ids it saw")
+check(R.Current() == nil, "and no run is open outside")
 
--- Another copy from a corpse. -----------------------------------------------------------------------
-loot(corpse, {})
-check(R.Current().copy == 8801871, "the new run learns its copy")
-now = now + 30
-loot("Creature-0-8452-48-9900000-4807-1C5DBBE381", { { 2589, 1, 1 } })
-check(#events() == 2 and lastEvent().copy == 8801871, "a corpse of another copy closes it")
+-- A boss pulled again after its kill: listed again, the run goes on. ----------------------------------
+enter(BFD)
 cur = R.Current()
-check(cur.copy == 9900000 and cur.loot.n == 1 and cur.kills.creatures["4807"] == 1, "and opens one for the new copy")
+check(cur and cur.id ~= firstId and cur.copy == nil, "a new run on going back in after the reset")
+local secondId = cur.id
+fire("ENCOUNTER_START", 2916, "Ghamoo-ra", 1, 5)
+now = now + 20
+fire("ENCOUNTER_END", 2916, "Ghamoo-ra", 1, 5, 1)
+fire("ENCOUNTER_START", 2916, "Ghamoo-ra", 1, 5)
+check(#events() == 1 and R.Current().id == secondId and R.Current().pulling.encounterId == 2916,
+  "a killed boss pulled again doesn't end the run")
+now = now + 20
+fire("ENCOUNTER_END", 2916, "Ghamoo-ra", 1, 5, 1)
+check(#R.Current().bosses == 2 and R.Full(R.Current()), "it is listed twice, and the run is still a full one")
+now = now + 30
+leave()
+fire("CHAT_MSG_SYSTEM", "Blackfathom Deeps has been reset.")
+check(#events() == 2, "closed by its own reset")
+enter(BFD)
 
 -- Another instance. -----------------------------------------------------------------------------------
 leave()

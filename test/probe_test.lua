@@ -126,7 +126,7 @@ chat = {}
 _G.INSTANCE_RESET_SUCCESS = "%s has been reset."
 commands.probe.run("watch")
 check(said("watching: ENCOUNTER_START, ENCOUNTER_END, BOSS_KILL, CHAT_MSG_MONEY, CHAT_MSG_SYSTEM, "
-  .. "PLAYER_REGEN_DISABLED"), "says what it registered")
+  .. "PLAYER_REGEN_DISABLED, LOOT_OPENED"), "says what it registered")
 check(db.chronicle.probe.watch == true, "the watch is remembered")
 
 chat = {}
@@ -140,6 +140,13 @@ F.Fire("CHAT_MSG_MONEY", "You loot 4 Silver, 12 Copper")
 check(said("CHAT_MSG_MONEY: You loot 4 Silver, 12 Copper"), "the coin line as received")
 F.Fire("CHAT_MSG_MONEY", SECRET)
 check(said("CHAT_MSG_MONEY: secret"), "a hidden coin line")
+_G.GetLootSourceInfo = function() return "Creature-0-8452-48-8801871-4807-1C5DBBE380", 67 end
+F.Fire("LOOT_OPENED")
+check(said("loot source guid: Creature-0-8452-48-8801871-4807-1C5DBBE380 (map 48, copy 8801871, npc 4807)"),
+  "a looted corpse's GUID, taken apart")
+_G.GetLootSourceInfo = function() return SECRET end
+F.Fire("LOOT_OPENED")
+check(said("loot source guid: secret"), "a hidden loot source is named")
 
 chat = {}
 F.Fire("CHAT_MSG_SYSTEM", "Thorbrand has come online.")
@@ -215,7 +222,8 @@ do
   end
   chat = {}
   commands.probe.run("watch")
-  check(said("watching: ENCOUNTER_END, BOSS_KILL, CHAT_MSG_MONEY, CHAT_MSG_SYSTEM, PLAYER_REGEN_DISABLED; "
+  check(said("watching: ENCOUNTER_END, BOSS_KILL, CHAT_MSG_MONEY, CHAT_MSG_SYSTEM, PLAYER_REGEN_DISABLED, "
+    .. "LOOT_OPENED; "
     .. "refused ENCOUNTER_START"), "a refused event is named, the rest are still watched")
   commands.probe.run("off")
   _G.CreateFrame = create

@@ -4,11 +4,12 @@
 -- Lifecycle. A run opens on PLAYER_ENTERING_WORLD or ZONE_CHANGED_NEW_AREA inside a party or raid
 -- instance when no open run matches. It pauses when the character is outside (time outside is not
 -- counted) and resumes on coming back to the same map. It closes when the character enters another
--- instance or another copy (a looted corpse's GUID with this map and another copy), when the game says
--- the instance was reset (INSTANCE_RESET_SUCCESS, while outside), after 30 minutes outside (or at a
--- login after that long), or when a boss this run already killed is pulled again (ENCOUNTER_START with
--- an encounter id the run has a kill for: a new copy). A closed run is never reopened. The copy id is
--- learned only from a looted corpse (GetLootSourceInfo is plain inside; a unit's GUID is secret there).
+-- instance, when the game says the instance was reset (INSTANCE_RESET_SUCCESS, while outside), or
+-- after 30 minutes outside (or at a login after that long). Nothing that happens inside ends a run:
+-- a corpse whose GUID carries another copy id and a boss pulled again after its kill were both rules
+-- once, and runs started over mid-clear in game (2026-11-21). A closed run is never reopened. The copy
+-- id is the first looted corpse's (GetLootSourceInfo is plain inside; a unit's GUID is secret there);
+-- other ids on the run's corpses are counted in `otherCopies`, so the data can say what the field is.
 --
 -- Storage: RynaDB.chronicle.runs[guid] = { open = <the open run>, list = { <closed runs, oldest first,
 -- the newest 100> }, totals = { [mapId] = { instance, runs, seconds, xp, fastest, fastestId, last } } },
@@ -62,6 +63,7 @@ local MAX_BOSSES = 40
 local MAX_MEMBERS = 40
 local MAX_REP = 40
 local MAX_SEEN = 1000
+local MAX_COPIES = 8
 local METER_TRIES = 5
 local METER_DELAY = 2
 local CHANGE_DELAY = 0.5
@@ -452,13 +454,6 @@ end
 
 -- Bosses ----------------------------------------------------------------------------------------
 
-local function killed(run, encounterId)
-  for _, b in ipairs(run.bosses or {}) do
-    if b.encounterId == encounterId and b.success then return true end
-  end
-  return false
-end
-
 -- Whether a run killed every boss it pulled, and at least one: only such a run can be a fastest.
 function R.Full(run)
   if type(run) ~= "table" or type(run.bosses) ~= "table" then return false end
@@ -515,6 +510,7 @@ local function wire(run, leftAt)
   for q, n in pairs(run.loot.byQuality) do byQuality[tostring(q)] = n end
   return {
     at = leftAt, id = run.id, mapId = run.mapId, instance = run.instance, kind = run.kind, copy = run.copy,
+    otherCopies = run.otherCopies and copy(run.otherCopies) or nil,
     difficulty = run.difficulty, enteredAt = run.enteredAt, leftAt = leftAt, seconds = n0(run.seconds),
     combatSeconds = n0(run.combatSeconds), firstPullAt = run.firstPullAt, entries = n0(run.entries),
     level = copy(run.level), xp = copy(run.xp),
@@ -728,22 +724,25 @@ end
 -- A loot source GUID from Chronicle.lua (GetLootSourceInfo, plain inside a dungeon): the run's copy
 -- from the first corpse of its map, a corpse of another copy closing it, and the creature tally.
 function R.Source(guid)
-  local run, s = openRun()
+  local run = openRun()
   if not on() or not run or not run.insideSince then return end
   if type(guid) ~= "string" or ns.IsSecret(guid) or guid == "" then return end
   local kind, map, copyId = guid:match("^(%a+)%-[^%-]*%-[^%-]*%-(%d+)%-(%d+)%-")
   if kind == "Creature" or kind == "Vehicle" then
     map, copyId = tonumber(map), tonumber(copyId)
     if map == run.mapId and copyId then
+      -- The first corpse's id is the run's. Another id is counted and nothing more: runs were seen
+      -- starting over mid-clear in game (2026-11-21), so this field isn't trusted to stay the same
+      -- for every creature of one copy, and it never ends a run.
       if run.copy == nil then
         run.copy = copyId
         changed()
       elseif run.copy ~= copyId then
-        close(s, run)
-        local here = where()
-        if not here then return end
-        run = newRun(s, here)
-        run.copy = copyId
+        local others = type(run.otherCopies) == "table" and run.otherCopies or {}
+        run.otherCopies = others
+        local key, count = tostring(copyId), 0
+        for _ in pairs(others) do count = count + 1 end
+        if others[key] or count < MAX_COPIES then others[key] = n0(others[key]) + 1 end
       end
     end
   end
@@ -853,16 +852,11 @@ function R.OnSystem(msg)
 end
 
 function R.OnEncounterStart(encounterId, name)
-  local run, s = openRun()
+  local run = openRun()
   encounterId = num(encounterId)
   if not on() or not run or not run.insideSince or not encounterId then return end
-  if killed(run, encounterId) then
-    -- A boss this run already killed: the instance was reset, so this is a new copy.
-    close(s, run)
-    local here = where()
-    if not here then return end
-    run = newRun(s, here)
-  end
+  -- A boss this run already killed can be pulled again (a reset without leaving, or an encounter the
+  -- game starts twice): it is listed again, and never ends the run.
   run.pull = { encounterId = encounterId, name = str(name), at = ns.Now() }
   changed()
 end
@@ -1034,9 +1028,13 @@ function R.Current()
   local run = openRun()
   if not run then return nil end
   local now = ns.Now()
+  -- The per-item table (up to 300 rows) isn't part of the view: it is set aside, not copied and dropped,
+  -- since the views ask for this after every loot.
+  local items = run.loot.items
+  run.loot.items = nil
   local view = copy(run)
+  run.loot.items = items
   view.meterSkip, view.meterDone, view.pull = nil, nil, nil
-  view.loot.items = nil
   view.seconds = insideSeconds(run, now)
   view.paused = run.insideSince == nil
   view.outsideFor = run.outsideSince and math.max(0, now - run.outsideSince) or nil

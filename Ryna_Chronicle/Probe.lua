@@ -6,7 +6,8 @@
 --                       GetInstanceInfo, the target's GUID (its instance copy and creature id), and
 --                       whether the GUID, the name, experience and money are secret here
 --   /ryna probe watch   also print a boss's ENCOUNTER_START, ENCOUNTER_END and BOSS_KILL, the coin
---                       line (CHAT_MSG_MONEY), an instance reset's system line, and the same reading
+--                       line (CHAT_MSG_MONEY), each looted corpse's GUID, an instance reset's
+--                       system line, and the same reading
 --                       at the start of the next three fights; kept on across a /reload
 --   /ryna probe off     stop watching
 --   /ryna probe show    every line so far in a box to copy from (the last 80, kept across a /reload)
@@ -25,7 +26,7 @@ ns.Probe = P
 local MAX_LINES = 80
 local FIGHTS = 3
 local EVENTS = { "ENCOUNTER_START", "ENCOUNTER_END", "BOSS_KILL", "CHAT_MSG_MONEY", "CHAT_MSG_SYSTEM",
-  "PLAYER_REGEN_DISABLED" }
+  "PLAYER_REGEN_DISABLED", "LOOT_OPENED" }
 
 local function store()
   local db = ns.db
@@ -91,16 +92,19 @@ local function first(name, ...)
 end
 
 -- The target's GUID taken apart: Creature-0-<server>-<map>-<instance copy>-<npc>-<spawn>.
-local function guidLine()
-  local guid = first("UnitGUID", "target")
-  if guid == nil then return "target: none" end
-  if ns.IsSecret(guid) then return "target guid: secret" end
+local function guidText(what, guid)
+  if guid == nil then return what .. ": none" end
+  if ns.IsSecret(guid) then return what .. " guid: secret" end
   local parts = {}
   for part in tostring(guid):gmatch("[^-]+") do parts[#parts + 1] = part end
   if (parts[1] == "Creature" or parts[1] == "Vehicle") and #parts >= 7 then
-    return string.format("target guid: %s (map %s, copy %s, npc %s)", guid, parts[4], parts[5], parts[6])
+    return string.format("%s guid: %s (map %s, copy %s, npc %s)", what, guid, parts[4], parts[5], parts[6])
   end
-  return "target guid: " .. tostring(guid) .. " (not a creature)"
+  return what .. " guid: " .. tostring(guid) .. " (not a creature)"
+end
+
+local function guidLine()
+  return guidText("target", first("UnitGUID", "target"))
 end
 
 function P.Now(why)
@@ -135,6 +139,9 @@ local function onEvent(_, event, ...)
   elseif event == "CHAT_MSG_SYSTEM" then
     local msg = ...
     if not ns.IsSecret(msg) and isReset(msg) then say("reset line: " .. msg) end
+  elseif event == "LOOT_OPENED" then
+    -- Each corpse's GUID as the loot window names it: is the copy field the same for every creature?
+    say(guidText("loot source", first("GetLootSourceInfo", 1)))
   elseif event == "CHAT_MSG_MONEY" then
     say("CHAT_MSG_MONEY: " .. show((...)))
   else
