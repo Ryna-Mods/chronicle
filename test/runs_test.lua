@@ -331,6 +331,15 @@ check(cur.kills.creatures["4807"] == 1, "the corpse counts its creature")
 check(cur.loot.n == 2 and cur.loot.qty == 5 and cur.loot.byQuality["3"] == 1 and cur.loot.byQuality["1"] == 1,
   "drops, pieces and qualities")
 check(cur.worth.vendor == 3470 + 4 * 13 and cur.worth.auction == nil, "vendor worth so far, no auction without Prices")
+check(cur.worth.total == cur.worth.coin + 3470 + 4 * 13, "the total: coin plus the loot, no auction to weigh")
+-- With the auction table: an item worth more at auction counts there, one worth more at a vendor
+-- counts there, and the two totals are never added to each other.
+auctionsTable = { version = 1, items = { [5196] = { 39000, 41000, 3, 2, 2, 1800000000, 40000, 5, 9 },
+  [2589] = { 5, 0, 1, 1, 1, 1800000000, 0, 0, 0 } } }
+cur = R.Current()
+check(cur.worth.auction == 41000 + 4 * 5, "auction worth: today's median, else the agreed min")
+check(cur.worth.total == cur.worth.coin + 41000 + 4 * 13, "the total takes each item's better value")
+auctionsTable = nil
 loot(corpse, {})
 check(R.Current().kills.creatures["4807"] == 1, "the same corpse opened again isn't counted twice")
 loot(SECRET, { { 2589, 1, 1 } })
@@ -428,6 +437,7 @@ check(e.loot.n == 3 and e.loot.qty == 6 and e.loot.byQuality["1"] == 2, "loot")
 check(#e.loot.top == 2 and e.loot.top[1].id == 5196 and e.loot.top[1].vendor == 3470 and e.loot.top[2].qty == 5,
   "the most valuable first")
 check(e.worth.coin == 10454 and e.worth.vendor == 3470 + 65 and e.worth.auction == nil, "worth")
+check(e.worth.total == 10454 + 3470 + 65, "the event's total: coin plus each item at its better value")
 check(e.durability.lost == 10 and e.durability.of == 220 and e.deaths == 1 and e.quests[1] == 2040, "the rest")
 check(e.rep["72"] == 250 and e.meter.damage == 41100 and e.party.members[1].guid == "Player-91-00B3E9D1",
   "rep, meter, party")

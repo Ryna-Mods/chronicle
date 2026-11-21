@@ -25,7 +25,8 @@
 --
 --   Runs.Current()        the open run as a view, or nil: the stored fields plus live numbers:
 --                         seconds (inside so far), paused, outsideFor, inCombat, combatSeconds,
---                         xpPerHour, worth { coin, vendor, auction } so far, bosses with `split` (seconds
+--                         xpPerHour, worth { coin, vendor, auction, total } so far (total: coin plus each
+--                         item at the higher of vendor and auction), bosses with `split` (seconds
 --                         inside from entering to the boss's end), pulling (a boss fight under way)
 --   Runs.List(guid)       closed runs, newest first (guid defaults to the current character)
 --   Runs.Totals(guid)     { [mapId] = totals } of the runs folded out of the list
@@ -415,10 +416,12 @@ local function auctionPrice(t, id)
   return nil
 end
 
--- The run's loot priced: vendor total, auction total (nil without the table), the top items.
+-- The run's loot priced: vendor total, auction total (nil without the table), the top items, and the
+-- best total (each item at the higher of its vendor and auction value: the two totals overlap, so they
+-- are never added to each other).
 local function priced(run)
   local t = auctions()
-  local vendor, auction, rows = 0, t and 0 or nil, {}
+  local vendor, auction, best, rows = 0, t and 0 or nil, 0, {}
   for id, e in pairs(run.loot.items or {}) do
     local qty = n0(e.qty)
     local v = vendorPrice(id) * qty
@@ -426,6 +429,7 @@ local function priced(run)
     a = a and a * qty or nil
     vendor = vendor + v
     if a then auction = auction + a end
+    best = best + math.max(v, a or 0)
     rows[#rows + 1] = { id = tonumber(id) or id, qty = qty, vendor = v, auction = a, worth = math.max(v, a or 0) }
   end
   table.sort(rows, function(x, y)
@@ -437,7 +441,7 @@ local function priced(run)
     local r = rows[i]
     top[i] = { id = r.id, qty = r.qty, vendor = r.vendor, auction = r.auction }
   end
-  return vendor, auction, top
+  return vendor, auction, top, best
 end
 
 -- Bosses ----------------------------------------------------------------------------------------
@@ -496,7 +500,7 @@ end
 
 -- The run as the journal's `run` event carries it (docs/wow.md 20.1), priced now.
 local function wire(run, leftAt)
-  local vendor, auction, top = priced(run)
+  local vendor, auction, top, best = priced(run)
   local bosses = {}
   for i, b in ipairs(run.bosses) do
     bosses[i] = { encounterId = b.encounterId, name = b.name, at = b.at, seconds = b.seconds, success = b.success }
@@ -511,7 +515,7 @@ local function wire(run, leftAt)
     kills = { n = n0(run.kills.n), creatures = copy(run.kills.creatures) },
     bosses = bosses,
     loot = { n = n0(run.loot.n), qty = n0(run.loot.qty), byQuality = byQuality, top = top },
-    worth = { coin = n0(run.coin), vendor = vendor, auction = auction },
+    worth = { coin = n0(run.coin), vendor = vendor, auction = auction, total = n0(run.coin) + best },
     durability = { lost = n0(run.durability.lost), of = n0(run.durability.of) },
     deaths = n0(run.deaths), quests = copy(run.quests), rep = copy(run.rep),
     meter = run.meter and { damage = run.meter.damage, healing = run.meter.healing,
@@ -1033,8 +1037,8 @@ function R.Current()
   view.inCombat = run.combatSince ~= nil
   view.combatSeconds = n0(run.combatSeconds) + (run.combatSince and math.max(0, now - run.combatSince) or 0)
   view.xpPerHour = perHour(run.xp.total, view.seconds)
-  local vendor, auction = priced(run)
-  view.worth = { coin = n0(run.coin), vendor = vendor, auction = auction }
+  local vendor, auction, _, best = priced(run)
+  view.worth = { coin = n0(run.coin), vendor = vendor, auction = auction, total = n0(run.coin) + best }
   view.pulling = run.pull and copy(run.pull) or nil
   view.full = R.Full(view)
   return view
@@ -1064,6 +1068,7 @@ end
 
 local function worthOf(r)
   local w = type(r.worth) == "table" and r.worth or {}
+  if type(w.total) == "number" then return w.total end
   return n0(w.coin) + n0(w.vendor)
 end
 
