@@ -39,4 +39,5 @@ Characters.lua
 Items.lua
 Tooltip.lua
 Tabs.lua
+Probe.lua
 Init.lua
