@@ -120,6 +120,13 @@ check(not R.Current().paused, "back in: the run goes on")
 check(not S.frame:IsShown(), "back in: the summary goes")
 eq(R.Current().entries, 2, "the same run, entered twice")
 
+-- A death puts the character outside as a ghost: the run pauses, with no summary on the way back in.
+_G.UnitIsDeadOrGhost = function() return true end
+H.Leave()
+check(R.Current().paused and not S.frame:IsShown(), "a death outside pauses the run without a summary")
+_G.UnitIsDeadOrGhost = function() return false end
+H.Enter(H.DM)
+
 -- Out again, then the 30 minutes pass while the summary is up: it is shown closed.
 H.Leave()
 check(S.frame:IsShown(), "out again: the summary again")

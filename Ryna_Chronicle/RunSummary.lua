@@ -284,6 +284,9 @@ function S.OnChange(what)
   end
   if what.pause then
     if not ns.Setting("runSummary") then return end
+    -- Not for a death: a ghost outside is on the way back in, and a wipe is no time for a summary.
+    local dead = ns.Try(ns.Fn("UnitIsDeadOrGhost"), "player")
+    if dead ~= nil and not ns.IsSecret(dead) and dead == true then return end
     local run = ns.Runs.Current()
     if run and run.paused then S.Show(run, false) end
     return
