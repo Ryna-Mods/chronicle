@@ -502,7 +502,16 @@ L["The live run display is off: choose /ryna runs strip or /ryna runs card first
 L["The run display is showing an example: drag it where you want it, then type /ryna runs test again."] = true
 L["The example run is gone."] = true
 L["The run display can't be drawn on this client."] = true
-L["/ryna runs: your dungeon runs; /ryna runs strip, card or off: the live display; /ryna runs test: place it"] = true
+L["/ryna runs: your dungeon runs; /ryna runs strip, card or off: the live display; "
+  .. "/ryna runs test: place it; /ryna runs forget split or all: forget saved runs"] = true
+L["/ryna runs forget split: the runs one visit was cut into by an old version; "
+  .. "/ryna runs forget all: every saved run of this character"] = true
+L["No run here looks like part of a visit that was cut up."] = true
+L["This character has no saved runs."] = true
+L["Forgot %s. What ryna.io already has stays there."] = true
+L["This forgets %s saved for this character, for good. Type it again within %d seconds to do it."] = true
+L["%d run"] = true
+L["%d runs"] = true
 L["The Deadmines (an example)"] = true
 L["Open in Ryna"] = true
 L["Ryna can track this run"] = true

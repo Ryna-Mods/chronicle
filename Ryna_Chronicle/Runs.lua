@@ -41,6 +41,8 @@
 --                         A run that didn't kill every boss it started is never a fastest.
 --   Runs.Display()        the runDisplay setting: "strip", "card" or "off"
 --   Runs.Full(run)        whether a run killed every boss it pulled (and at least one)
+--   Runs.ForgetCount(what) / Runs.Forget(what)   "split" or "all": how many closed runs that is, and
+--                         forgetting them (the saved file only; /ryna runs forget asks first)
 --   Runs.CurrentTop()     the open run's most valuable drops so far, priced now (as a closed run's
 --                         loot.top), for the summary on leaving
 --
@@ -1055,6 +1057,63 @@ function R.CurrentTop()
   if not run then return {} end
   local _, _, top = priced(run)
   return top
+end
+
+-- Forgetting -------------------------------------------------------------------------------------
+--
+-- /ryna runs forget (Dungeons.lua asks twice before calling this). Only this character's closed runs
+-- in the saved file: the open run stays, and what ryna.io already has stays there.
+--
+--   "split"  the runs addon 0.7.0 cut one visit into: every run of a chain in which one run of a map
+--            starts within a second of the last one's end (two or more in a row)
+--   "all"    every closed run, and the totals of the runs folded out of the list
+
+-- The indexes (into `list`, oldest first as stored) of the runs "split" would forget.
+local function splitIndexes(list)
+  local order = {}
+  for i, r in ipairs(list) do
+    if type(r) == "table" and r.mapId and type(r.enteredAt) == "number" then order[#order + 1] = i end
+  end
+  table.sort(order, function(a, b) return list[a].enteredAt < list[b].enteredAt end)
+  local marked = {}
+  for k = 2, #order do
+    local before, after = list[order[k - 1]], list[order[k]]
+    local gap = after.enteredAt - n0(before.leftAt)
+    if before.mapId == after.mapId and type(before.leftAt) == "number" and gap >= 0 and gap <= 1 then
+      marked[order[k - 1]], marked[order[k]] = true, true
+    end
+  end
+  return marked
+end
+
+-- How many runs `what` would forget for the character, without forgetting any.
+function R.ForgetCount(what, guid)
+  local s = store(guid or myGuid())
+  if not s then return 0 end
+  if what == "all" then return #s.list end
+  if what ~= "split" then return 0 end
+  local n = 0
+  for _ in pairs(splitIndexes(s.list)) do n = n + 1 end
+  return n
+end
+
+-- Forgets them; returns how many went.
+function R.Forget(what, guid)
+  local s = store(guid or myGuid())
+  if not s then return 0 end
+  local gone = 0
+  if what == "all" then
+    gone = #s.list
+    s.list, s.totals = {}, {}
+  elseif what == "split" then
+    local marked, kept = splitIndexes(s.list), {}
+    for i, r in ipairs(s.list) do
+      if marked[i] then gone = gone + 1 else kept[#kept + 1] = r end
+    end
+    s.list = kept
+  end
+  if gone > 0 then changed() end
+  return gone
 end
 
 -- Closed runs, newest first.

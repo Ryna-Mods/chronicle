@@ -118,11 +118,47 @@ end
 -- /ryna runs ------------------------------------------------------------------------------------------
 
 local HELP = L["/ryna runs: your dungeon runs; /ryna runs strip, card or off: the live display; "
-  .. "/ryna runs test: place it"]
+  .. "/ryna runs test: place it; /ryna runs forget split or all: forget saved runs"]
 
-function Dn.Command(arg)
+-- /ryna runs forget <split|all>: said once it tells how many runs that is, said again within this
+-- long it forgets them. Nothing is forgotten on one line of typing.
+local FORGET_WINDOW = 30
+local asked = nil
+
+local function forget(what)
+  local R = ns.Runs
+  if what ~= "split" and what ~= "all" then
+    asked = nil
+    ns.Print(L["/ryna runs forget split: the runs one visit was cut into by an old version; "
+      .. "/ryna runs forget all: every saved run of this character"])
+    return
+  end
+  local n = R.ForgetCount(what)
+  if n == 0 then
+    asked = nil
+    ns.Print(what == "split" and L["No run here looks like part of a visit that was cut up."]
+      or L["This character has no saved runs."])
+    return
+  end
+  local now = ns.Now()
+  if asked and asked.what == what and now - asked.at <= FORGET_WINDOW then
+    asked = nil
+    local gone = R.Forget(what)
+    ns.Print(string.format(L["Forgot %s. What ryna.io already has stays there."],
+      ns.Plural(gone, L["%d run"], L["%d runs"])))
+    return
+  end
+  asked = { what = what, at = now }
+  ns.Print(string.format(L["This forgets %s saved for this character, for good. "
+    .. "Type it again within %d seconds to do it."], ns.Plural(n, L["%d run"], L["%d runs"]), FORGET_WINDOW))
+end
+
+function Dn.Command(arg, rest)
+  local second = tostring(rest or ""):lower():match("^%s*%S+%s+(%S+)") or ""
   arg = tostring(arg or ""):lower():match("^%s*(%S*)")
   local D = ns.RunDisplay
+  if arg == "forget" then return forget(second) end
+  asked = nil
   if arg == "" then
     return ns.Window.Open(KEY)
   end
@@ -147,5 +183,5 @@ function Dn.Command(arg)
   ns.Print(HELP)
 end
 
-ns.API.Slash.Add({ word = "runs", order = 32, run = function(arg) Dn.Command(arg) end,
+ns.API.Slash.Add({ word = "runs", order = 32, run = function(arg, rest) Dn.Command(arg, rest) end,
   help = HELP })

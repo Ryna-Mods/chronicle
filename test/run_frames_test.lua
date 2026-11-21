@@ -248,6 +248,30 @@ eq(settings.runDisplay, "off", "a click steps it on: card, then neither")
 F.Click(control)
 eq(settings.runDisplay, "strip", "then a thin strip")
 
-check(#F.chat - chatAtStart == 9, "nothing in chat but the answers to /ryna runs (" .. (#F.chat - chatAtStart) .. ")")
+-- /ryna runs forget: asked twice, and only then. ------------------------------------------------------------
+do
+  local function last() return F.Plain(F.chat[#F.chat]) end
+  local had = #R.List()
+  check(had > 0, "there are runs to forget")
+  SlashCmdList.RYNA("runs forget")
+  check(last():find("/ryna runs forget split", 1, true) ~= nil, "forget alone says what it takes")
+  SlashCmdList.RYNA("runs forget split")
+  check(last():find("No run here looks like part of a visit that was cut up", 1, true) ~= nil, "no cut runs: says so")
+  SlashCmdList.RYNA("runs forget all")
+  check(last():find("Type it again within 30 seconds", 1, true) ~= nil and #R.List() == had,
+    "the first time it only says how many, and asks again")
+  SlashCmdList.RYNA("runs strip")
+  SlashCmdList.RYNA("runs forget all")
+  check(#R.List() == had, "another command in between, and it asks again")
+  H.Later(31)
+  SlashCmdList.RYNA("runs forget all")
+  check(#R.List() == had, "too late, and it asks again")
+  SlashCmdList.RYNA("runs forget all")
+  check(#R.List() == 0 and last():find("Forgot", 1, true) ~= nil, "said twice in time, they are forgotten")
+  SlashCmdList.RYNA("runs forget all")
+  check(last():find("no saved runs", 1, true) ~= nil, "nothing left: says so")
+end
+
+check(#F.chat - chatAtStart == 17, "nothing in chat but the answers to /ryna runs (" .. (#F.chat - chatAtStart) .. ")")
 check(core.errors.count == 0, "no errors caught: " .. tostring(core.errors.last))
 H.done("run frames")

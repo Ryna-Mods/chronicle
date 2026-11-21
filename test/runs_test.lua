@@ -623,6 +623,35 @@ F.RunTimers()
 check(changes.open == 1 and changes.pause == 1 and changes.close == 1 and changes.resume == 1 and changes.change == 1,
   "OnChange hears open, pause, resume, change and close, coalesced")
 check(changes.close and changes.resume and changes.change, "OnChange hears close, resume and changes")
+
+-- Forgetting: the runs one visit was cut into, then everything. --------------------------------------
+do
+  local s = runs()
+  local open = s.open
+  s.list = {
+    { id = "a", mapId = 48, enteredAt = 1000, leftAt = 1200 },   -- three in a row, each starting as the
+    { id = "b", mapId = 48, enteredAt = 1200, leftAt = 1260 },   -- last one ended: one visit, cut up
+    { id = "c", mapId = 48, enteredAt = 1261, leftAt = 1500 },
+    { id = "d", mapId = 48, enteredAt = 9000, leftAt = 9900 },   -- a run of its own, later
+    { id = "e", mapId = 36, enteredAt = 9900, leftAt = 9990 },   -- another dungeon straight after: not a cut
+    { id = "f", mapId = 36, enteredAt = 20000, leftAt = 20500 },
+    { id = "g", mapId = 36, enteredAt = 20498, leftAt = 21000 }, -- overlapping, not a cut
+  }
+  s.totals = { [48] = { runs = 3, seconds = 900, xp = 10 } }
+  check(R.ForgetCount("split") == 3 and R.ForgetCount("all") == 7 and R.ForgetCount("nonsense") == 0,
+    "counting what would go changes nothing")
+  check(#s.list == 7, "nothing forgotten by counting")
+  check(R.Forget("nonsense") == 0 and #runs().list == 7, "an unknown kind forgets nothing")
+  check(R.Forget("split") == 3, "the three cut runs go")
+  local left = {}
+  for _, r in ipairs(runs().list) do left[#left + 1] = r.id end
+  check(table.concat(left) == "defg", "the others stay, in their order")
+  check(runs().totals[48].runs == 3, "the totals of older runs are left alone")
+  check(R.Forget("split") == 0, "nothing left to cut")
+  check(R.Forget("all") == 4 and #runs().list == 0 and next(runs().totals) == nil,
+    "all: every closed run and the totals")
+  check(runs().open == open, "the open run is never forgotten")
+end
 check(#chat == 0, "silent: nothing in chat")
 check(#errors == 0, "no handler raised: " .. table.concat(errors, "; "))
 print(string.format("runs: %d checks, %d failed", checks, failures))
