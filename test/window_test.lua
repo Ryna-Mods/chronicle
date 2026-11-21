@@ -155,8 +155,8 @@ check(R.Window.AddSection({ key = "probe", group = "combat", label = "Probe", or
 
 local order = {}
 for _, s in ipairs(Wn.List()) do order[#order + 1] = s.key end
-eq(table.concat(order, " "), "session characters items kills loot zones history probe",
-  "rail order: Me by order, then combat")
+eq(table.concat(order, " "), "session characters items kills loot zones history dungeons probe",
+  "rail order: Me by order, then World (Dungeons), then combat")
 
 -- /chronicle opens the window; the first time ever, on Session (the rail's first).
 SlashCmdList.RYNACHRONICLE("")
@@ -168,7 +168,7 @@ local inSpecial = false
 for _, name in ipairs(UISpecialFrames) do if name == "RynaWindow" then inSpecial = true end end
 check(inSpecial, "Escape closes it (UISpecialFrames)")
 check(f.groupHeads.me:IsShown() and f.groupHeads.combat:IsShown(), "the Me and Combat and gold headings are drawn")
-check(not f.groupHeads.world:IsShown(), "World has no section: its heading isn't drawn")
+check(f.groupHeads.world:IsShown(), "World holds Dungeons: its heading is drawn")
 eq(f.groupHeads.combat:GetText(), "COMBAT AND GOLD", "the group heading's text")
 check(f.railButtons.session._locked and not f.railButtons.kills._locked, "the rail marks the section on screen")
 check(not f.picker:IsEnabled(), "Session is the character you're on: the picker is greyed")

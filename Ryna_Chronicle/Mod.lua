@@ -7,7 +7,8 @@
 -- sections of Ryna's window (Window.lua, Characters.lua, Items.lua). It writes the same RynaDB the
 -- core addon carried before the split (docs/wow.md section 2), so the companion app and ryna.io see
 -- no change; the live view adds only
--- RynaDB.chronicle.session (a session kept across a /reload) and its own settings.
+-- RynaDB.chronicle.session (a session kept across a /reload), RynaDB.chronicle.runs (dungeon runs,
+-- Runs.lua) and its own settings.
 --
 -- The files below call ns.Try, ns.On, ns.Journal.Add and so on as they always have: here those are
 -- the API's functions, so nothing reaches into the core's own namespace. ns.db reads Ryna.DB() each

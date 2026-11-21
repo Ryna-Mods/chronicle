@@ -40,4 +40,9 @@ Items.lua
 Tooltip.lua
 Tabs.lua
 Probe.lua
+Runs.lua
+RunView.lua
+RunDisplay.lua
+RunSummary.lua
+Dungeons.lua
 Init.lua
