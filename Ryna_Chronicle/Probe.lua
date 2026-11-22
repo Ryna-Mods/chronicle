@@ -9,8 +9,11 @@
 --                       line (CHAT_MSG_MONEY), each looted corpse's GUID, an instance reset's
 --                       system line, and the same reading
 --                       at the start of the next three fights; kept on across a /reload
+--                       and, for loot: CHAT_MSG_LOOT, a roll starting (with GetLootRollItemInfo),
+--                       a roll's system lines, and the loot history's record of each drop
+--   /ryna probe loot    which loot history this client has, and what it holds now (after a boss)
 --   /ryna probe off     stop watching
---   /ryna probe show    every line so far in a box to copy from (the last 80, kept across a /reload)
+--   /ryna probe show    every line so far in a box to copy from (the last 240, kept across a /reload)
 --   /ryna probe clear   forget them
 --
 -- The lines are for a report, so they stay in English whatever the client's language. Nothing here is
@@ -23,10 +26,15 @@ if ns.off then return end
 local P = {}
 ns.Probe = P
 
-local MAX_LINES = 80
+local MAX_LINES = 240
 local FIGHTS = 3
+-- The loot events are both generations' (the modern loot history's and Classic's): which of them
+-- this client lets an addon register is part of the answer.
 local EVENTS = { "ENCOUNTER_START", "ENCOUNTER_END", "BOSS_KILL", "CHAT_MSG_MONEY", "CHAT_MSG_SYSTEM",
-  "PLAYER_REGEN_DISABLED", "LOOT_OPENED" }
+  "PLAYER_REGEN_DISABLED", "LOOT_OPENED", "CHAT_MSG_LOOT", "START_LOOT_ROLL", "LOOT_ROLLS_COMPLETE",
+  "LOOT_ITEM_ROLL_WON", "LOOT_HISTORY_UPDATE_ENCOUNTER", "LOOT_HISTORY_UPDATE_DROP",
+  "LOOT_HISTORY_ROLL_COMPLETE", "LOOT_HISTORY_ROLL_CHANGED", "LOOT_HISTORY_FULL_UPDATE" }
+local DESCRIBE_KEYS = 14
 
 local function store()
   local db = ns.db
@@ -66,6 +74,23 @@ local function say(text)
   ns.Print("probe: " .. text)
 end
 
+-- A value written out for a report: a table's fields (sorted, at most DESCRIBE_KEYS, two levels deep),
+-- each hidden value as "secret", so a paste says both what the client answers and what it hides.
+local function describe(v, depth)
+  depth = depth or 0
+  if v == nil or ns.IsSecret(v) or type(v) ~= "table" then return show(v) end
+  if depth >= 2 then return "{...}" end
+  local keys = {}
+  for k in pairs(v) do keys[#keys + 1] = k end
+  table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+  local parts = {}
+  for i = 1, math.min(#keys, DESCRIBE_KEYS) do
+    parts[i] = tostring(keys[i]) .. "=" .. describe(v[keys[i]], depth + 1)
+  end
+  if #keys > DESCRIBE_KEYS then parts[#parts + 1] = string.format("(+%d more)", #keys - DESCRIBE_KEYS) end
+  return "{" .. table.concat(parts, ", ") .. "}"
+end
+
 -- A call's results with their count, since a client call may answer nil in the middle (GetInstanceInfo).
 local function results(ok, ...)
   return ok, select("#", ...), { ... }
@@ -80,6 +105,27 @@ local function call(name, ...)
   if n < 1 then return "nothing" end
   local parts = {}
   for i = 1, n do parts[i] = show(values[i]) end
+  return table.concat(parts, ", ")
+end
+
+-- A call in one of the client's tables (C_LootHistory.GetSortedInfoForDrop): its first result, or nil.
+local function first2(tableName, name, ...)
+  local f = ns.Fn(tableName, name)
+  if not f then return nil end
+  local ok, v = pcall(f, ...)
+  if ok then return v end
+  return nil
+end
+
+-- Every result of a call in one of the client's tables, as shown text.
+local function call2(tableName, name, ...)
+  local f = ns.Fn(tableName, name)
+  if not f then return "missing" end
+  local ok, n, values = results(pcall(f, ...))
+  if not ok then return "error" end
+  if n < 1 then return "nothing" end
+  local parts = {}
+  for i = 1, n do parts[i] = describe(values[i]) end
   return table.concat(parts, ", ")
 end
 
@@ -117,6 +163,48 @@ function P.Now(why)
     hidden(first("UnitXP", "player")), hidden(first("UnitXPMax", "player")), hidden(first("GetMoney"))))
 end
 
+-- /ryna probe loot: which loot history this client has (the modern one by encounter, Classic's by
+-- item, or none), and what it holds right now.
+function P.Loot()
+  local H = _G.C_LootHistory
+  if type(H) ~= "table" then
+    say("loot: C_LootHistory " .. (H == nil and "missing" or type(H)))
+  else
+    local names = {}
+    for k, v in pairs(H) do
+      if type(v) == "function" then names[#names + 1] = tostring(k) end
+    end
+    table.sort(names)
+    say("loot: C_LootHistory has " .. (#names > 0 and table.concat(names, ", ") or "no functions"))
+    local encounters = first2("C_LootHistory", "GetAllEncounterInfos")
+    if type(encounters) == "table" and not ns.IsSecret(encounters) then
+      say(string.format("loot: %d encounters in the history", #encounters))
+      local last = encounters[#encounters]
+      if type(last) == "table" then
+        say("loot: the last encounter: " .. describe(last))
+        local drops = first2("C_LootHistory", "GetSortedDropsForEncounter", last.encounterID)
+        if type(drops) == "table" and not ns.IsSecret(drops) then
+          say(string.format("loot: its drops: %d", #drops))
+          for i = 1, math.min(#drops, 3) do say(string.format("loot: drop %d: %s", i, describe(drops[i]))) end
+        else
+          say("loot: its drops: " .. show(drops))
+        end
+      end
+    else
+      say("loot: GetAllEncounterInfos: " .. show(encounters))
+    end
+    local items = first2("C_LootHistory", "GetNumItems") -- Classic's history, by item
+    if items ~= nil then
+      say("loot: Classic history items: " .. show(items))
+      if type(items) == "number" and not ns.IsSecret(items) and items > 0 then
+        say("loot: item 1: " .. call2("C_LootHistory", "GetItem", 1))
+        say("loot: item 1, player 1: " .. call2("C_LootHistory", "GetPlayerInfo", 1, 1))
+      end
+    end
+  end
+  say("loot: method " .. call("GetLootMethod") .. "; threshold " .. call("GetLootThreshold"))
+end
+
 -- An instance reset's system line, by the client's own text ("%s has been reset."), whatever the language.
 local function isReset(msg)
   local format = _G.INSTANCE_RESET_SUCCESS
@@ -138,12 +226,29 @@ local function onEvent(_, event, ...)
     ns.After(2, "probe", function() P.Now(label) end)
   elseif event == "CHAT_MSG_SYSTEM" then
     local msg = ...
-    if not ns.IsSecret(msg) and isReset(msg) then say("reset line: " .. msg) end
+      if ns.IsSecret(msg) or type(msg) ~= "string" then return end
+    if isReset(msg) then
+      say("reset line: " .. msg)
+    elseif msg:find("|Hitem:", 1, true) then
+      say("system line with an item: " .. msg) -- a roll's lines ("X rolls 87 (Need) for [item]", "X won")
+    end
   elseif event == "LOOT_OPENED" then
     -- Each corpse's GUID as the loot window names it: is the copy field the same for every creature?
     say(guidText("loot source", first("GetLootSourceInfo", 1)))
   elseif event == "CHAT_MSG_MONEY" then
     say("CHAT_MSG_MONEY: " .. show((...)))
+  elseif event == "CHAT_MSG_LOOT" then
+    -- "X receives loot: [item]": the line, and the name the client sends beside it.
+    local text, player = ...
+    say("CHAT_MSG_LOOT: " .. show(text) .. " | from " .. show(player))
+  elseif event == "START_LOOT_ROLL" then
+    local rollId = ...
+    say("START_LOOT_ROLL: " .. show(rollId) .. " -> GetLootRollItemInfo: " .. call("GetLootRollItemInfo", rollId))
+  elseif event == "LOOT_HISTORY_UPDATE_DROP" then
+    -- The modern loot history's own record of one drop: the winner and every roll, if it says.
+    local encounterId, dropId = ...
+    local info = first2("C_LootHistory", "GetSortedInfoForDrop", encounterId, dropId)
+    say(string.format("LOOT_HISTORY_UPDATE_DROP: %s, %s -> %s", show(encounterId), show(dropId), describe(info)))
   else
     local parts = {}
     for i = 1, select("#", ...) do parts[i] = show((select(i, ...))) end
@@ -235,12 +340,14 @@ local function command(arg)
     P.Watch(true)
   elseif arg == "off" then
     P.Watch(false)
+  elseif arg == "loot" then
+    P.Loot()
   elseif arg == "show" then
     P.Show()
   elseif arg == "clear" then
     P.Clear()
   else
-    ns.Print("usage: /ryna probe (a reading now), /ryna probe watch||off||show||clear")
+    ns.Print("usage: /ryna probe (a reading now), /ryna probe watch||off||loot||show||clear")
   end
 end
 P.Command = command
@@ -255,4 +362,4 @@ ns.On("PLAYER_LOGIN", function()
 end)
 
 ns.API.Slash.Add({ word = "probe", order = 90, run = command,
-  help = "/ryna probe: what the client answers here (for a report); /ryna probe watch||off||show||clear" })
+  help = "/ryna probe: what the client answers here (for a report); /ryna probe watch||off||loot||show||clear" })

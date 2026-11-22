@@ -42,8 +42,9 @@ _G.Ryna = {
     if type(fn) ~= "function" then return nil end
     return passResults(pcall(fn, ...))
   end,
-  Fn = function(a)
+  Fn = function(a, b)
     local v = _G[a]
+    if b ~= nil then v = type(v) == "table" and v[b] or nil end
     return type(v) == "function" and v or nil
   end,
   IsSecret = function(v) return v == SECRET end,
@@ -126,7 +127,9 @@ chat = {}
 _G.INSTANCE_RESET_SUCCESS = "%s has been reset."
 commands.probe.run("watch")
 check(said("watching: ENCOUNTER_START, ENCOUNTER_END, BOSS_KILL, CHAT_MSG_MONEY, CHAT_MSG_SYSTEM, "
-  .. "PLAYER_REGEN_DISABLED, LOOT_OPENED"), "says what it registered")
+  .. "PLAYER_REGEN_DISABLED, LOOT_OPENED, CHAT_MSG_LOOT, START_LOOT_ROLL, LOOT_ROLLS_COMPLETE, LOOT_ITEM_ROLL_WON, "
+  .. "LOOT_HISTORY_UPDATE_ENCOUNTER, LOOT_HISTORY_UPDATE_DROP, LOOT_HISTORY_ROLL_COMPLETE, "
+  .. "LOOT_HISTORY_ROLL_CHANGED, LOOT_HISTORY_FULL_UPDATE"), "says what it registered")
 check(db.chronicle.probe.watch == true, "the watch is remembered")
 
 chat = {}
@@ -147,6 +150,31 @@ check(said("loot source guid: Creature-0-8452-48-8801871-4807-1C5DBBE380 (map 48
 _G.GetLootSourceInfo = function() return SECRET end
 F.Fire("LOOT_OPENED")
 check(said("loot source guid: secret"), "a hidden loot source is named")
+
+-- Loot and rolls: the line, a roll starting, a roll's system line, the loot history's record of a drop.
+local link = "|cff1eff00|Hitem:5196::::::::20:::::|h[Smite's Mighty Hammer]|h|r"
+F.Fire("CHAT_MSG_LOOT", "Thorbrand receives loot: " .. link .. ".", "Thorbrand-Forever")
+check(said("CHAT_MSG_LOOT: Thorbrand receives loot: ") and said(" | from Thorbrand-Forever"),
+  "a loot line and whose it is")
+F.Fire("CHAT_MSG_LOOT", SECRET, SECRET)
+check(said("CHAT_MSG_LOOT: secret | from secret"), "a hidden loot line")
+_G.GetLootRollItemInfo = function() return 132345, "Smite's Mighty Hammer", 1, 3, true, true, true, false end
+F.Fire("START_LOOT_ROLL", 7, 60000)
+check(said("START_LOOT_ROLL: 7 -> GetLootRollItemInfo: 132345, Smite's Mighty Hammer, 1, 3, true, true, true, false"),
+  "a roll starting, with what the client says of it")
+chat = {}
+F.Fire("CHAT_MSG_SYSTEM", "Thorbrand rolls 87 (Need) for " .. link)
+check(said("system line with an item: Thorbrand rolls 87 (Need) for "), "a roll's system line")
+_G.C_LootHistory = {
+  GetSortedInfoForDrop = function()
+    return { itemHyperlink = link, winner = { playerName = SECRET, isSelf = false },
+      rollInfos = { { playerName = "Thorbrand", roll = 87, state = 0, isWinner = true } } }
+  end,
+}
+F.Fire("LOOT_HISTORY_UPDATE_DROP", 2916, 3)
+check(said("LOOT_HISTORY_UPDATE_DROP: 2916, 3 -> {itemHyperlink=") and said("winner={isSelf=false, playerName=secret}"),
+  "the loot history's drop, a hidden name marked")
+check(said("rollInfos={1={...}}"), "and no deeper than two levels")
 
 chat = {}
 F.Fire("CHAT_MSG_SYSTEM", "Thorbrand has come online.")
@@ -176,9 +204,9 @@ F.Fire("PLAYER_REGEN_DISABLED")
 check(#chat == 0, "nothing after off")
 
 -- The kept lines: capped, shown in a box, cleared. -------------------------------------------------
-for _ = 1, 30 do commands.probe.run("") end
-check(#kept() == 80, "at most 80 lines are kept")
-check(kept()[80]:match("^%d%d:%d%d:%d%d hidden here"), "each kept line carries its time")
+for _ = 1, 60 do commands.probe.run("") end
+check(#kept() == 240, "at most 240 lines are kept")
+check(kept()[240]:match("^%d%d:%d%d:%d%d hidden here"), "each kept line carries its time")
 chat = {}
 commands.probe.run("show")
 check(#chat == 0, "show opens its box without a chat line")
@@ -223,11 +251,39 @@ do
   chat = {}
   commands.probe.run("watch")
   check(said("watching: ENCOUNTER_END, BOSS_KILL, CHAT_MSG_MONEY, CHAT_MSG_SYSTEM, PLAYER_REGEN_DISABLED, "
-    .. "LOOT_OPENED; "
-    .. "refused ENCOUNTER_START"), "a refused event is named, the rest are still watched")
+    .. "LOOT_OPENED, CHAT_MSG_LOOT") and said("; refused ENCOUNTER_START"),
+    "a refused event is named, the rest are still watched")
   commands.probe.run("off")
   _G.CreateFrame = create
 end
+
+-- /ryna probe loot: which loot history there is, and what it holds. ---------------------------------------
+chat = {}
+_G.C_LootHistory = nil
+commands.probe.run("loot")
+check(said("loot: C_LootHistory missing"), "no loot history at all")
+_G.GetLootMethod = function() return "group" end
+_G.GetLootThreshold = function() return 2 end
+_G.C_LootHistory = {
+  GetAllEncounterInfos = function() return { { encounterID = 2916, encounterName = "Ghamoo-ra", startTime = 5 } } end,
+  GetSortedDropsForEncounter = function()
+    return { { lootListID = 3, itemHyperlink = "[x]", winner = { playerName = "A" } } }
+  end,
+  GetSortedInfoForDrop = function() return {} end,
+}
+commands.probe.run("loot")
+check(said("loot: C_LootHistory has GetAllEncounterInfos, GetSortedDropsForEncounter, GetSortedInfoForDrop"),
+  "the functions the client has, named")
+check(said("loot: 1 encounters in the history") and said("encounterName=Ghamoo-ra"), "the encounters it holds")
+check(said("loot: drop 1: {itemHyperlink=[x], lootListID=3, winner={playerName=A}}"), "the last encounter's drops")
+check(said("loot: method group; threshold 2"), "the loot method and threshold")
+_G.C_LootHistory = { GetNumItems = function() return 1 end,
+  GetItem = function() return 7, "[x]", 5, false, 2, false end,
+  GetPlayerInfo = function() return "Thorbrand", "WARRIOR", 1, 87, true, false end }
+chat = {}
+commands.probe.run("loot")
+check(said("loot: Classic history items: 1") and said("loot: item 1, player 1: Thorbrand, WARRIOR, 1, 87, true, false"),
+  "Classic's loot history, where that is the one there is")
 
 check(#errors == 0, "no handler raised: " .. table.concat(errors, "; "))
 print(string.format("probe: %d checks, %d failed", checks, failures))
