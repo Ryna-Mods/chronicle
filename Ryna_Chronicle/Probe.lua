@@ -12,13 +12,25 @@
 --                       and, for loot: CHAT_MSG_LOOT, a roll starting (with GetLootRollItemInfo),
 --                       a roll's system lines, and the loot history's record of each drop
 --   /ryna probe loot    which loot history this client has, and what it holds now (after a boss)
+--   /ryna probe comms   addon messages: registers a prefix, sends "ping" to this character by whisper
+--                       and to the party, raid and guild it is in, and prints each one that arrives
+--                       with its channel and whether the sender's name is plain
+--   /ryna probe group   what the client says of party1 to party4: away, connected, in range, dead,
+--                       role, level, and whether the name and GUID are hidden (never the name)
+--   /ryna probe casts   the next ten casts by party or raid members (UNIT_SPELLCAST_SUCCEEDED)
+--   /ryna probe meter   the game's damage meter, every type over the whole session: each source's
+--                       class and amount, and whether its name is hidden (after a fight)
+--   /ryna probe guild   the guild calls this client has, row 1 of the roster as the client orders
+--                       it, what this rank may do, and whether there is a calendar
 --   /ryna probe off     stop watching
 --   /ryna probe show    every line so far in a box to copy from (the last 240, kept across a /reload)
 --   /ryna probe clear   forget them
 --
 -- The lines are for a report, so they stay in English whatever the client's language. Nothing here is
 -- recorded on a character, sent to the journal or read by the companion app: the lines live in
--- RynaDB.chronicle.probe until cleared.
+-- RynaDB.chronicle.probe until cleared. comms is the one probe that sends: the word "ping" under
+-- the prefix RynaProbe, only when the command is typed. group, casts and meter name nobody: another
+-- player shows as a unit, a class and "plain" or "secret".
 
 local _, ns = ...
 if ns.off then return end
@@ -149,6 +161,25 @@ local function guidText(what, guid)
   return what .. " guid: " .. tostring(guid) .. " (not a creature)"
 end
 
+-- The functions in one of the client's tables, sorted.
+local function functionNames(t)
+  local names = {}
+  for k, v in pairs(t) do
+    if type(v) == "function" then names[#names + 1] = tostring(k) end
+  end
+  table.sort(names)
+  return names
+end
+
+-- A call that failed says why: "refused" and "blocked" are answers.
+local function outcome(ok, n, values)
+  if not ok then return "error: " .. (ns.IsSecret(values[1]) and "secret" or tostring(values[1])) end
+  if n < 1 then return "nothing" end
+  local parts = {}
+  for i = 1, n do parts[i] = show(values[i]) end
+  return table.concat(parts, ", ")
+end
+
 local function guidLine()
   return guidText("target", first("UnitGUID", "target"))
 end
@@ -170,11 +201,7 @@ function P.Loot()
   if type(H) ~= "table" then
     say("loot: C_LootHistory " .. (H == nil and "missing" or type(H)))
   else
-    local names = {}
-    for k, v in pairs(H) do
-      if type(v) == "function" then names[#names + 1] = tostring(k) end
-    end
-    table.sort(names)
+    local names = functionNames(H)
     say("loot: C_LootHistory has " .. (#names > 0 and table.concat(names, ", ") or "no functions"))
     local encounters = first2("C_LootHistory", "GetAllEncounterInfos")
     if type(encounters) == "table" and not ns.IsSecret(encounters) then
@@ -203,6 +230,255 @@ function P.Loot()
     end
   end
   say("loot: method " .. call("GetLootMethod") .. "; threshold " .. call("GetLootThreshold"))
+end
+
+-- /ryna probe comms: does an addon message arrive, on which channels, and is the sender's name plain?
+-- The sender is what the game stamps on a message, so it is what an ownership check would stand on.
+local PREFIX = "RynaProbe"
+local SECRET_PREFIXES = 3
+local commsFrame
+local secretPrefixes = 0
+
+-- This character's name as the client gives it: whole ("First-Last") and short.
+local function ownNames()
+  local name, realm
+  local f = ns.Fn("UnitFullName")
+  if f then
+    local ok, a, b = pcall(f, "player")
+    if ok then name, realm = a, b end
+  end
+  if name == nil then name = first("UnitName", "player") end
+  if type(name) ~= "string" or ns.IsSecret(name) then return nil end
+  if type(realm) == "string" and not ns.IsSecret(realm) and realm ~= "" then
+    return name .. "-" .. realm, name
+  end
+  return name, name
+end
+
+-- A sender for a report: this character's own name as received, anyone else only as "another player".
+local function sender(v)
+  if v == nil then return "nil" end
+  if ns.IsSecret(v) then return "secret" end
+  local full, short = ownNames()
+  v = tostring(v)
+  if full and (v == full or v == short or v:sub(1, #short + 1) == short .. "-") then
+    return v .. " (this character)"
+  end
+  return "another player (plain)"
+end
+
+local function onComms(_, _, prefix, text, channel, from)
+  if ns.IsSecret(prefix) then
+    if secretPrefixes < SECRET_PREFIXES then
+      secretPrefixes = secretPrefixes + 1
+      say("CHAT_MSG_ADDON: a message whose prefix is secret")
+    end
+    return
+  end
+  if prefix ~= PREFIX then return end
+  say(string.format("CHAT_MSG_ADDON: %s | %s | from %s", show(text), show(channel), sender(from)))
+end
+
+function P.Comms()
+  say("comms: messaging lockdown " .. call2("C_ChatInfo", "InChatMessagingLockdown")
+    .. "; in combat " .. call("InCombatLockdown") .. "; IsInInstance " .. call("IsInInstance"))
+  say("comms: RegisterAddonMessagePrefix: " .. call2("C_ChatInfo", "RegisterAddonMessagePrefix", PREFIX))
+  say("comms: UnitFullName: " .. call("UnitFullName", "player"))
+  if not commsFrame then
+    commsFrame = ns.Try(_G.CreateFrame, "Frame")
+    if commsFrame then
+      commsFrame:SetScript("OnEvent", function(...) ns.Run("probe", onComms, ...) end)
+    end
+  end
+  if not commsFrame then
+    say("comms: this client gave no frame")
+  elseif not pcall(commsFrame.RegisterEvent, commsFrame, "CHAT_MSG_ADDON") then
+    say("comms: refused CHAT_MSG_ADDON")
+  end
+  secretPrefixes = 0
+  local send = ns.Fn("C_ChatInfo", "SendAddonMessage")
+  if not send then
+    say("comms: C_ChatInfo.SendAddonMessage missing")
+    return
+  end
+  local function try(label, channel, target)
+    local sent = outcome(results(pcall(send, PREFIX, "ping " .. label, channel, target)))
+    say(string.format("comms: sent %s: %s", label, sent))
+  end
+  local full, short = ownNames()
+  if full then
+    try("whisper", "WHISPER", full)
+    if short ~= full then try("whisper-short", "WHISPER", short) end
+  else
+    say("comms: this character's name is hidden here, no whisper tried")
+  end
+  local skipped = {}
+  local channels = { { "party", "PARTY", "IsInGroup" }, { "raid", "RAID", "IsInRaid" },
+    { "guild", "GUILD", "IsInGuild" } }
+  for _, c in ipairs(channels) do
+    local inIt = first(c[3])
+    if inIt and not ns.IsSecret(inIt) then try(c[1], c[2]) else skipped[#skipped + 1] = c[1] end
+  end
+  if #skipped > 0 then say("comms: not tried (not in one): " .. table.concat(skipped, ", ")) end
+  say("comms: each ping that arrives prints a CHAT_MSG_ADDON line; none within a few seconds means none arrived")
+end
+
+-- /ryna probe group: what the client lets an addon know of the others in the party, in or out of a
+-- fight. A member's name and GUID are reported only as plain or secret.
+local GROUP_CALLS = { "UnitIsAFK", "UnitIsConnected", "UnitInRange", "UnitIsVisible", "UnitIsDeadOrGhost",
+  "UnitGroupRolesAssigned", "UnitLevel" }
+
+function P.Group()
+  say("group: in combat " .. call("InCombatLockdown") .. "; IsInInstance " .. call("IsInInstance")
+    .. "; members " .. call("GetNumGroupMembers"))
+  local seen = 0
+  for i = 1, 4 do
+    local unit = "party" .. i
+    local exists = first("UnitExists", unit)
+    if exists and not ns.IsSecret(exists) then
+      seen = seen + 1
+      local parts = { "name " .. hidden(first("UnitName", unit)), "guid " .. hidden(first("UnitGUID", unit)) }
+      for _, name in ipairs(GROUP_CALLS) do parts[#parts + 1] = name .. " " .. call(name, unit) end
+      say("group: " .. unit .. ": " .. table.concat(parts, "; "))
+    end
+  end
+  if seen == 0 then say("group: no party members (party1 to party4)") end
+end
+
+-- /ryna probe casts: does the client tell an addon what the others cast? The next few, then it stops.
+local CASTS = 10
+local castFrame
+local casts = 0
+
+local function stopCasts()
+  if castFrame then pcall(castFrame.UnregisterEvent, castFrame, "UNIT_SPELLCAST_SUCCEEDED") end
+end
+
+local function onCast(_, _, unit, castGuid, spellId)
+  if ns.IsSecret(unit) then
+    say("cast: the unit is secret")
+  elseif type(unit) == "string" and (unit:find("^party%d") or unit:find("^raid%d")) then
+    say(string.format("cast: %s spell %s (cast guid %s)", unit, show(spellId), hidden(castGuid)))
+  else
+    return
+  end
+  casts = casts + 1
+  if casts >= CASTS then
+    stopCasts()
+    say("casts: done")
+  end
+end
+
+function P.Casts()
+  if not castFrame then
+    castFrame = ns.Try(_G.CreateFrame, "Frame")
+    if castFrame then castFrame:SetScript("OnEvent", function(...) ns.Run("probe", onCast, ...) end) end
+  end
+  if not castFrame then
+    say("casts: this client gave no frame")
+    return
+  end
+  casts = 0
+  if pcall(castFrame.RegisterEvent, castFrame, "UNIT_SPELLCAST_SUCCEEDED") then
+    say(string.format("casts: the next %d casts by party or raid members", CASTS))
+  else
+    say("casts: refused UNIT_SPELLCAST_SUCCEEDED")
+  end
+end
+
+-- /ryna probe meter: the game's own damage meter over the whole session (session type 0), one line a
+-- meter type, by the client's own list of types where it has one. A source is its class and amount.
+local METER_SOURCES = 6
+
+function P.Meter()
+  if type(_G.C_DamageMeter) ~= "table" then
+    say("meter: C_DamageMeter missing")
+    return
+  end
+  say("meter: available " .. call2("C_DamageMeter", "IsDamageMeterAvailable")
+    .. "; in combat " .. call("InCombatLockdown"))
+  local sessions = first2("C_DamageMeter", "GetAvailableCombatSessions")
+  local counted = type(sessions) == "table" and not ns.IsSecret(sessions)
+  say("meter: sessions " .. (counted and tostring(#sessions) or show(sessions)))
+  local types = {}
+  local E = type(_G.Enum) == "table" and _G.Enum.DamageMeterType
+  if type(E) == "table" then
+    for k, v in pairs(E) do
+      if type(v) == "number" then types[#types + 1] = { name = tostring(k), id = v } end
+    end
+  else
+    for id = 0, 10 do types[#types + 1] = { name = "type", id = id } end
+  end
+  table.sort(types, function(a, b) return a.id < b.id end)
+  for _, t in ipairs(types) do
+    local s = first2("C_DamageMeter", "GetCombatSessionFromType", 0, t.id)
+    if type(s) ~= "table" or ns.IsSecret(s) then
+      say(string.format("meter: %s (%d): %s", t.name, t.id, show(s)))
+    else
+      local parts = {}
+      local sources = s.combatSources
+      if type(sources) == "table" and not ns.IsSecret(sources) then
+        for i = 1, math.min(#sources, METER_SOURCES) do
+          local c = sources[i]
+          if type(c) == "table" and not ns.IsSecret(c) then
+            local you = not ns.IsSecret(c.isLocalPlayer) and c.isLocalPlayer == true
+            parts[#parts + 1] = show(c.classFilename) .. " " .. show(c.totalAmount)
+              .. (you and " (you)" or "") .. ", name " .. hidden(c.name)
+          end
+        end
+        if #sources > METER_SOURCES then
+          parts[#parts + 1] = string.format("(+%d more)", #sources - METER_SOURCES)
+        end
+      end
+      say(string.format("meter: %s (%d): total %s: %s", t.name, t.id, show(s.totalAmount),
+        #parts > 0 and table.concat(parts, "; ") or "no sources"))
+    end
+  end
+end
+
+-- /ryna probe guild: which guild calls this client has, the order GetGuildRosterInfo answers in (row 1,
+-- which Chronicle's roster already keeps), what this rank may do, and whether there is a calendar.
+-- It only asks: nothing here writes a note, changes a rank or invites.
+local GUILD_MAY = { "CanViewOfficerNote", "CanEditOfficerNote", "CanEditPublicNote", "CanGuildPromote",
+  "CanGuildDemote", "CanGuildRemove", "CanGuildInvite" }
+local GUILD_GLOBALS = { "GuildRosterSetPublicNote", "GuildRosterSetOfficerNote", "GuildPromote", "GuildDemote",
+  "GuildUninvite", "GuildInvite", "SetGuildMemberRank", "QueryGuildEventLog", "GetNumGuildEvents",
+  "GetGuildEventInfo", "GetGuildRosterLastOnline" }
+local CALENDAR_CALLS = { "OpenCalendar", "GetNumDayEvents", "GetNumGuildEvents", "GetGuildEventInfo",
+  "CreateGuildSignUpEvent", "EventGetInvite" }
+
+function P.Guild()
+  say("guild: in a guild " .. call("IsInGuild") .. "; members " .. call("GetNumGuildMembers"))
+  local G = _G.C_GuildInfo
+  if type(G) ~= "table" then
+    say("guild: C_GuildInfo " .. (G == nil and "missing" or type(G)))
+  else
+    local names = functionNames(G)
+    say("guild: C_GuildInfo has " .. (#names > 0 and table.concat(names, ", ") or "no functions"))
+  end
+  say("guild: GetGuildRosterInfo(1): " .. call("GetGuildRosterInfo", 1))
+  local may = {}
+  for i, name in ipairs(GUILD_MAY) do may[i] = name .. " " .. call(name) end
+  say("guild: " .. table.concat(may, "; "))
+  local present, missing = {}, {}
+  for _, name in ipairs(GUILD_GLOBALS) do
+    local list = ns.Fn(name) and present or missing
+    list[#list + 1] = name
+  end
+  say("guild: globals present: " .. (#present > 0 and table.concat(present, ", ") or "none")
+    .. "; missing: " .. (#missing > 0 and table.concat(missing, ", ") or "none"))
+  local C = _G.C_Calendar
+  if type(C) ~= "table" then
+    say("guild: C_Calendar " .. (C == nil and "missing" or type(C)))
+  else
+    local has = {}
+    for _, name in ipairs(CALENDAR_CALLS) do
+      if ns.Fn("C_Calendar", name) then has[#has + 1] = name end
+    end
+    say(string.format("guild: C_Calendar has %d functions; of the ones asked: %s", #functionNames(C),
+      #has > 0 and table.concat(has, ", ") or "none"))
+  end
+  say("guild: C_Club " .. (type(_G.C_Club) == "table" and "present" or "missing"))
 end
 
 -- An instance reset's system line, by the client's own text ("%s has been reset."), whatever the language.
@@ -262,6 +538,7 @@ function P.Watch(on, quiet)
   local s = store()
   if s then s.watch = on and true or nil end
   if not on then
+    stopCasts()
     if frame then
       for _, event in ipairs(EVENTS) do pcall(frame.UnregisterEvent, frame, event) end
     end
@@ -342,12 +619,23 @@ local function command(arg)
     P.Watch(false)
   elseif arg == "loot" then
     P.Loot()
+  elseif arg == "comms" then
+    P.Comms()
+  elseif arg == "group" then
+    P.Group()
+  elseif arg == "casts" then
+    P.Casts()
+  elseif arg == "meter" then
+    P.Meter()
+  elseif arg == "guild" then
+    P.Guild()
   elseif arg == "show" then
     P.Show()
   elseif arg == "clear" then
     P.Clear()
   else
-    ns.Print("usage: /ryna probe (a reading now), /ryna probe watch||off||loot||show||clear")
+    ns.Print("usage: /ryna probe (a reading now), /ryna probe "
+      .. "watch||off||loot||comms||group||casts||meter||guild||show||clear")
   end
 end
 P.Command = command
@@ -362,4 +650,5 @@ ns.On("PLAYER_LOGIN", function()
 end)
 
 ns.API.Slash.Add({ word = "probe", order = 90, run = command,
-  help = "/ryna probe: what the client answers here (for a report); /ryna probe watch||off||loot||show||clear" })
+  help = "/ryna probe: what the client answers here (for a report); /ryna probe "
+    .. "watch||off||loot||comms||group||casts||meter||guild||show||clear" })

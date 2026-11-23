@@ -285,6 +285,149 @@ commands.probe.run("loot")
 check(said("loot: Classic history items: 1") and said("loot: item 1, player 1: Thorbrand, WARRIOR, 1, 87, true, false"),
   "Classic's loot history, where that is the one there is")
 
+-- /ryna probe comms: the prefix, each send, and what arrives. --------------------------------------------
+chat = {}
+local sent = {}
+_G.UnitFullName = function() return "Maddie", "Markham" end
+_G.IsInInstance = function() return false, "none" end
+_G.IsInGroup = function() return true end
+_G.IsInRaid = function() return false end
+_G.IsInGuild = function() return true end
+_G.C_ChatInfo = {
+  InChatMessagingLockdown = function() return false end,
+  RegisterAddonMessagePrefix = function() return true end,
+  SendAddonMessage = function(prefix, text, channel, target)
+    if channel == "GUILD" then error("refused in a test") end
+    sent[#sent + 1] = { prefix, text, channel, target }
+    return 0
+  end,
+}
+commands.probe.run("comms")
+check(said("comms: messaging lockdown false; in combat false; IsInInstance false, none"), "comms says where it is")
+check(said("comms: RegisterAddonMessagePrefix: true") and said("comms: UnitFullName: Maddie, Markham"),
+  "the prefix's answer and the name as the client gives it")
+check(#sent == 3 and sent[1][1] == "RynaProbe" and sent[1][3] == "WHISPER" and sent[1][4] == "Maddie-Markham"
+  and sent[2][4] == "Maddie" and sent[3][3] == "PARTY", "a whisper to the whole name, to the short one, and the party")
+check(said("comms: sent whisper: 0") and said("comms: sent party: 0"), "each send's answer")
+check(said("comms: sent guild: error: ") and said("refused in a test"), "a refused send says why")
+check(said("comms: not tried (not in one): raid"), "a channel it isn't in is named")
+chat = {}
+F.Fire("CHAT_MSG_ADDON", "RynaProbe", "ping whisper", "WHISPER", "Maddie-Markham")
+check(said("CHAT_MSG_ADDON: ping whisper | WHISPER | from Maddie-Markham (this character)"),
+  "a ping that arrives, with its own sender whole")
+F.Fire("CHAT_MSG_ADDON", "RynaProbe", "ping party", "PARTY", "Thorbrand-Ironfoot")
+check(said("CHAT_MSG_ADDON: ping party | PARTY | from another player (plain)") and not said("Thorbrand"),
+  "someone else's ping never names them")
+F.Fire("CHAT_MSG_ADDON", "RynaProbe", "ping party", "PARTY", SECRET)
+check(said("| PARTY | from secret"), "a hidden sender is named as hidden")
+chat = {}
+F.Fire("CHAT_MSG_ADDON", "DBM", "x", "PARTY", "Thorbrand-Ironfoot")
+check(#chat == 0, "another addon's message is ignored")
+for _ = 1, 5 do F.Fire("CHAT_MSG_ADDON", SECRET, SECRET, SECRET, SECRET) end
+check(#chat == 3, "a secret prefix is said three times, no more")
+chat = {}
+_G.C_ChatInfo.SendAddonMessage = nil
+commands.probe.run("comms")
+check(said("comms: C_ChatInfo.SendAddonMessage missing"), "a client without the call says so")
+
+-- /ryna probe group: the others in the party, never by name. --------------------------------------------
+chat = {}
+_G.GetNumGroupMembers = function() return 3 end
+_G.UnitExists = function(unit) return unit == "party1" or unit == "party2" end
+_G.UnitName = function(unit) return unit == "party2" and SECRET or "Thorbrand" end
+_G.UnitGUID = function() return "Player-91-0A4C7F12" end
+_G.UnitIsAFK = function(unit) return unit == "party1" end
+_G.UnitIsConnected = function() return true end
+_G.UnitInRange = function() return true, true end
+_G.UnitIsDeadOrGhost = function() return false end
+_G.UnitGroupRolesAssigned = function() return "TANK" end
+_G.UnitLevel = function() return SECRET end
+commands.probe.run("group")
+check(said("group: in combat false; IsInInstance false, none; members 3"), "group says where it is")
+check(said("group: party1: name plain; guid plain; UnitIsAFK true; UnitIsConnected true; UnitInRange true, true; "
+  .. "UnitIsVisible missing; UnitIsDeadOrGhost false; UnitGroupRolesAssigned TANK; UnitLevel secret"),
+  "a member's answers, a missing call and a hidden one named")
+check(said("group: party2: name secret; guid plain; UnitIsAFK false"), "a hidden name is named as hidden")
+check(not said("Thorbrand") and not said("Player-91"), "no name and no GUID in a group line")
+chat = {}
+_G.UnitExists = function() return false end
+commands.probe.run("group")
+check(said("group: no party members"), "alone, it says so")
+
+-- /ryna probe casts: the next ten by the group. ------------------------------------------------------------
+chat = {}
+commands.probe.run("casts")
+check(said("casts: the next 10 casts by party or raid members"), "casts says what it waits for")
+chat = {}
+F.Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-3-1", 585)
+check(#chat == 0, "this character's own casts are left out")
+F.Fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "Cast-3-2", 355)
+check(said("cast: party1 spell 355 (cast guid plain)"), "a party member's cast")
+F.Fire("UNIT_SPELLCAST_SUCCEEDED", "party2", SECRET, SECRET)
+check(said("cast: party2 spell secret (cast guid secret)"), "a hidden spell is named as hidden")
+F.Fire("UNIT_SPELLCAST_SUCCEEDED", SECRET, SECRET, SECRET)
+check(said("cast: the unit is secret"), "a hidden unit is named as hidden")
+for _ = 1, 20 do F.Fire("UNIT_SPELLCAST_SUCCEEDED", "raid7", "Cast-3-3", 1) end
+check(said("casts: done"), "it stops by itself")
+local castLines = 0
+for _, line in ipairs(chat) do
+  if line:find("probe: cast: ", 1, true) then castLines = castLines + 1 end
+end
+check(castLines == 10, "after ten lines")
+
+-- /ryna probe meter: every type, a source as its class and amount. ----------------------------------------
+chat = {}
+_G.C_DamageMeter = nil
+commands.probe.run("meter")
+check(said("meter: C_DamageMeter missing"), "no meter at all")
+_G.Enum = { DamageMeterType = { DamageDone = 0, HealingDone = 2 } }
+_G.C_DamageMeter = {
+  IsDamageMeterAvailable = function() return true end,
+  GetAvailableCombatSessions = function() return { {}, {} } end,
+  GetCombatSessionFromType = function(session, meter)
+    if session ~= 0 then return nil end
+    if meter == 2 then return SECRET end
+    return { totalAmount = 900, combatSources = {
+      { name = "Maddie", classFilename = "PRIEST", totalAmount = 300, isLocalPlayer = true },
+      { name = SECRET, classFilename = "WARRIOR", totalAmount = SECRET, isLocalPlayer = SECRET },
+    } }
+  end,
+}
+commands.probe.run("meter")
+check(said("meter: available true; in combat false") and said("meter: sessions 2"), "the meter and its sessions")
+check(said("meter: DamageDone (0): total 900: PRIEST 300 (you), name plain; WARRIOR secret, name secret"),
+  "a type's sources: class, amount, and whether the name is hidden")
+check(said("meter: HealingDone (2): secret"), "a hidden session is named as hidden")
+check(not said("Maddie,") and not said("name Maddie"), "no name in a meter line")
+_G.Enum = nil
+chat = {}
+commands.probe.run("meter")
+check(said("meter: type (0): total 900") and said("meter: type (2): secret") and said("meter: type (10): total 900"),
+  "without the client's list, types 0 to 10")
+
+-- /ryna probe guild: what there is to call, and the roster's order. ----------------------------------------
+chat = {}
+_G.GetNumGuildMembers = function() return 42, 7 end
+_G.C_GuildInfo = { GuildRoster = function() end, CanViewOfficerNote = function() return false end, x = 1 }
+_G.GetGuildRosterInfo = function()
+  return "Keyvah-Proudshield", "Officer", 1, 22, "Paladin", "Ironforge", "", "", true
+end
+_G.CanEditPublicNote = function() return true end
+_G.GuildPromote = function() error("the probe promoted someone") end
+_G.GuildRosterSetPublicNote = function() error("the probe wrote a note") end
+_G.C_Calendar = { OpenCalendar = function() end, GetNumDayEvents = function() return 0 end, other = function() end }
+_G.C_Club = nil
+commands.probe.run("guild")
+check(said("guild: in a guild true; members 42, 7"), "in a guild, and how many")
+check(said("guild: C_GuildInfo has CanViewOfficerNote, GuildRoster"), "the guild calls there are")
+check(said("guild: GetGuildRosterInfo(1): Keyvah-Proudshield, Officer, 1, 22, Paladin, Ironforge, , , true"),
+  "row 1 in the client's order")
+check(said("CanEditPublicNote true") and said("CanGuildPromote missing"), "what this rank may do")
+check(said("globals present: GuildRosterSetPublicNote, GuildPromote; missing: GuildRosterSetOfficerNote"),
+  "which of the acting calls exist, none of them called")
+check(said("guild: C_Calendar has 3 functions; of the ones asked: OpenCalendar, GetNumDayEvents"), "the calendar")
+check(said("guild: C_Club missing"), "and communities")
+
 check(#errors == 0, "no handler raised: " .. table.concat(errors, "; "))
 print(string.format("probe: %d checks, %d failed", checks, failures))
 os.exit(failures == 0 and 0 or 1)
