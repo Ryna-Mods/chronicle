@@ -6,7 +6,7 @@
 --          (at the level cap, bosses, drops and worth); outside, the timer stops and the bar says how
 --          long the run waits. Hovering it shows the card's detail as a tooltip.
 --   card   the same, larger: the experience bar, the run's numbers and each boss's split against the
---          fastest run here.
+--          fastest run here, with the items rolled for under the boss that dropped them and who won each.
 --
 -- One frame (RynaChronicleRun), dragged with the left button, held by its top left corner so the card
 -- grows downwards, its place kept in RynaDB.settings.runDisplayPos { x, y } (the corner, from the
@@ -27,7 +27,7 @@ local CARD_W = 260
 local PAD = 6
 local LINE = 15
 local BAR_H = 14
-local MAX_LINES = 24
+local MAX_LINES = 40
 local GOLD = { 1, 0.82, 0 }
 local DIM = { 0.62, 0.62, 0.62 }
 local EDGE = { 0.23, 0.21, 0.28 }
@@ -85,7 +85,8 @@ end
 function D.CardModel(view)
   if D.example then return D.example.card end
   local cmp = ns.Runs.Compare(view)
-  return V.Card(view, { capped = D.Capped(), xp = D.Xp(), compare = cmp, fastestRun = D.FastestRun(cmp) })
+  return V.Card(view, { capped = D.Capped(), xp = D.Xp(), compare = cmp, fastestRun = D.FastestRun(cmp),
+    itemInfo = ns.RunSummary and ns.RunSummary.ItemInfo })
 end
 
 -- The frame ---------------------------------------------------------------------------------------
@@ -322,10 +323,10 @@ local function drawCard(f, view)
   for _, s in ipairs(c.splits) do
     if n >= MAX_LINES then break end
     n = n + 1
-    local dim = s.state == "next" or s.state == "more"
+    local dim = s.state == "next" or s.state == "more" or s.state == "drop"
     local right = s.time
     if s.diffText then right = right .. "  " .. V.Tone(s.diffText, s.tone) end
-    setLine(f, n, y, V.Mark(s.state) .. s.name, right, dim)
+    setLine(f, n, y, V.SplitLeft(s), right, dim)
     y = y - LINE
   end
   hideLines(f, n + 1)

@@ -252,6 +252,57 @@ function F.Install(opts)
   _G.C_Item = { GetItemIconByID = function(id) return 100000 + id end }
 end
 
+-- The modern loot history (C_LootHistory, by encounter), as Forever has it (/ryna probe, 2026-11-23):
+-- F.loot.encounters[encounterId] is that encounter's drops in order, each a table as
+-- GetSortedInfoForDrop gives it ({ lootListKey, itemHyperlink, winner, rollInfos, allPassed, ... });
+-- F.Drop(encounterId, drop) adds one or replaces the one with its key. opts.enum: the roll states'
+-- Enum.EncounterLootDropRollState (retail's names by default; false for a client without it).
+function F.LootHistory(opts)
+  opts = opts or {}
+  local H = { encounters = {} }
+  F.loot = H
+  _G.C_LootHistory = {
+    GetAllEncounterInfos = function()
+      local out = {}
+      for id in pairs(H.encounters) do out[#out + 1] = { encounterID = id } end
+      return out
+    end,
+    GetSortedDropsForEncounter = function(id)
+      local list = H.encounters[id]
+      if not list then return nil end
+      local out = {}
+      for i, d in ipairs(list) do out[i] = d end
+      return out
+    end,
+    GetSortedInfoForDrop = function(id, key)
+      for _, d in ipairs(H.encounters[id] or {}) do
+        if type(d) == "table" and d.lootListKey == key then return d end
+      end
+      return nil
+    end,
+  }
+  if opts.enum == false then
+    _G.Enum.EncounterLootDropRollState = nil
+  else
+    _G.Enum.EncounterLootDropRollState = opts.enum
+      or { NeedMainSpec = 0, NeedOffSpec = 1, Transmog = 2, Greed = 3, NoDecision = 4, Pass = 5 }
+  end
+  return H
+end
+
+function F.Drop(encounterId, drop)
+  local list = F.loot.encounters[encounterId] or {}
+  F.loot.encounters[encounterId] = list
+  for i, d in ipairs(list) do
+    if type(d) == "table" and d.lootListKey == drop.lootListKey then
+      list[i] = drop
+      return drop
+    end
+  end
+  list[#list + 1] = drop
+  return drop
+end
+
 -- Loads an addon's files in its TOC's order with `ns` (the files the TOC names that exist; a locale
 -- file loads, and does nothing outside its locale).
 function F.LoadAddon(folder, name, ns, skip)

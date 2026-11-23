@@ -596,3 +596,22 @@ L["Your own damage done and healing done over the run, from the game's damage me
 L["A thin strip"] = nil
 L["A card"] = nil
 L["Neither"] = nil
+-- Loot rolls on a run (RunView.lua, RunSummary.lua): under each boss, the item and who won it with
+-- their choice and roll ("Sam Hammiche · Need 23"); on hover, every roll. The six choices are the
+-- game's loot roll buttons'; "No roll yet" is someone who hasn't chosen.
+L["Need"] = nil
+L["Off-spec"] = nil
+L["Transmog"] = nil
+L["Greed"] = nil
+L["No roll yet"] = nil
+L["Pass"] = nil
+-- A player's own roll: "Brennic (you)"; "You" when the game gave no name.
+L["%s (you)"] = nil
+L["You"] = nil
+L["Someone"] = nil
+L["Won"] = nil
+L["Everyone passed"] = nil
+L["Rolling"] = nil
+L["No winner recorded"] = nil
+L["%d more item rolled for"] = nil
+L["%d more items rolled for"] = nil

@@ -45,6 +45,12 @@
 --                         forgetting them (the saved file only; /ryna runs forget asks first)
 --   Runs.CurrentTop()     the open run's most valuable drops so far, priced now (as a closed run's
 --                         loot.top), for the summary on leaving
+--   Runs.RollType(state)  a loot roll's state as the wire's word ("need", "greed", ...), or nil
+--
+-- A run's `drops` (Loot rolls, below; on the open run, its view and a closed one alike): the items the
+-- group rolled for, oldest first, each { key, encounterId, itemId, name, at, allPassed, winner, rolls },
+-- winner and each roll { name, class, type, roll, self, won }; every field but key, encounterId, itemId
+-- and at may be absent, and `drops` itself is absent on a run with none.
 --
 -- Settings: runs (on), runSummary (on), runSummaryMeter (on), runDisplay ("off"; the core's
 -- AddDefaults takes booleans only, so Runs.Display() reads it with "off" as its default).
@@ -66,6 +72,7 @@ local MAX_MEMBERS = 40
 local MAX_REP = 40
 local MAX_SEEN = 1000
 local MAX_COPIES = 8
+local MAX_DROPS_WIRE = 60 -- the loot rolls kept on a run (Loot rolls, below)
 local METER_TRIES = 5
 local METER_DELAY = 2
 local CHANGE_DELAY = 0.5
@@ -480,6 +487,8 @@ end
 
 -- Opening and closing ---------------------------------------------------------------------------
 
+local readAllDrops -- (Loot rolls, below) the run's drops read again, on pausing and closing
+
 local function newRun(s, here)
   local now = ns.Now()
   local lvl = level()
@@ -499,6 +508,29 @@ local function newRun(s, here)
   baseline(run)
   changed("open")
   return run
+end
+
+-- The drops as the event carries them: absent with none; only the contract's fields, and never a GUID.
+local function wireDrops(drops)
+  if type(drops) ~= "table" or #drops == 0 then return nil end
+  local function who(r, withWon)
+    if type(r) ~= "table" then return nil end
+    return { name = r.name, class = r.class, type = r.type, roll = r.roll, self = r.self or nil,
+      won = withWon and r.won or nil }
+  end
+  local out = {}
+  for _, d in ipairs(drops) do
+    if type(d) == "table" and #out < MAX_DROPS_WIRE then
+      local w = { key = d.key, encounterId = d.encounterId, itemId = d.itemId, name = d.name, at = d.at,
+        allPassed = d.allPassed or nil, winner = who(d.winner, false) }
+      if type(d.rolls) == "table" and #d.rolls > 0 then
+        w.rolls = {}
+        for i, r in ipairs(d.rolls) do w.rolls[i] = who(r, true) end
+      end
+      out[#out + 1] = w
+    end
+  end
+  return out
 end
 
 -- The run as the journal's `run` event carries it (docs/wow.md 20.1), priced now.
@@ -525,6 +557,7 @@ local function wire(run, leftAt)
     meter = run.meter and { damage = run.meter.damage, healing = run.meter.healing,
       damageTaken = run.meter.damageTaken } or nil,
     party = copy(run.party),
+    drops = wireDrops(run.drops),
   }
 end
 R.Wire = wire
@@ -548,6 +581,7 @@ end
 -- Closes the open run: at `at` (when it is inside, now), its event written and the list trimmed.
 local function close(s, run, at)
   local now = ns.Now()
+  ns.Run("chronicle runs drops", readAllDrops, run, s)
   if run.insideSince then
     accumulate(run)
     at = now
@@ -594,6 +628,7 @@ end
 
 local function pause(run, at)
   if not run.insideSince then return end
+  ns.Run("chronicle runs drops", readAllDrops, run, store(myGuid()))
   accumulate(run)
   run.seconds = insideSeconds(run, at)
   run.insideSince = nil
@@ -940,6 +975,213 @@ function R.OnRoster()
   end
 end
 
+-- Loot rolls ------------------------------------------------------------------------------------------
+--
+-- The items the group rolled for, each under its boss, with the winner and what everyone chose: the
+-- modern loot history (C_LootHistory, by encounter; proven in game by /ryna probe, 2026-11-23). A drop
+-- is kept on the open run by (encounterId, lootListKey) and read again whole at each update, so a later
+-- reading replaces the earlier one (a drop updates several times while people choose). New drops are
+-- taken only while inside; the run's drops are read once more when it pauses or closes, so a roll that
+-- timed out without another event still ends up final. A key already on one of
+-- the character's closed runs is never taken (the history may still hold an earlier run's kill of the
+-- same boss). Every field is optional and taken only when plain.
+--
+-- Other players' names in rolls are always recorded (Maddison, 2026-11-23), unlike party.members,
+-- which stay behind "record group members". Their playerGUID is never read.
+
+local MAX_DROPS = MAX_DROPS_WIRE
+local MAX_ROLLS = 40
+local CLOSED_KEYS_FROM = 10 -- how many of the newest closed runs are checked for a key already taken
+
+-- Enum.EncounterLootDropRollState: winner's Need was 0, the player's own 4 before choosing and 3 after
+-- Greed (2026-11-23); the names are retail's.
+local ROLL_STATES = {
+  { "NeedMainSpec", 0, "need" }, { "NeedOffSpec", 1, "offspec" }, { "Transmog", 2, "transmog" },
+  { "Greed", 3, "greed" }, { "NoDecision", 4, "none" }, { "Pass", 5, "pass" },
+}
+
+-- Read each time (six names): the client's enum when it has one.
+local function rollTypeMap()
+  local map, named = {}, {}
+  local e = _G.Enum
+  local g = type(e) == "table" and e.EncounterLootDropRollState
+  if type(g) == "table" and not ns.IsSecret(g) then
+    for _, s in ipairs(ROLL_STATES) do
+      local v = num(g[s[1]])
+      if v and map[v] == nil then
+        map[v] = s[3]
+        named[s[1]] = true
+      end
+    end
+  end
+  -- A name the client's enum lacks (or no enum at all): the number seen in game, unless taken.
+  for _, s in ipairs(ROLL_STATES) do
+    if not named[s[1]] and map[s[2]] == nil then map[s[2]] = s[3] end
+  end
+  return map
+end
+
+-- A roll state as the wire's word, or nil for one it doesn't know.
+function R.RollType(state)
+  state = num(state)
+  if state == nil then return nil end
+  return rollTypeMap()[state]
+end
+
+-- One roll (or the winner) as it is kept: { name, class, type, roll, self, won }, or nil when nothing
+-- in it is readable. The name is stored as the game gives it ("Sam Hammiche").
+local function readRoll(r, withWon)
+  if type(r) ~= "table" or ns.IsSecret(r) then return nil end
+  local out = {
+    name = str(r.playerName), class = str(r.playerClass), type = R.RollType(r.state), roll = num(r.roll),
+  }
+  -- (r.playerGUID is never read: drops keep names, never GUIDs.)
+  if out.name == nil and out.class == nil and out.type == nil and out.roll == nil then return nil end
+  if plain(r.isSelf) == true then out.self = true end
+  if withWon and plain(r.isWinner) == true then out.won = true end
+  return out
+end
+
+-- A drop as the loot history gives it (GetSortedInfoForDrop), as kept; nil when its key or item id
+-- can't be read.
+local function readDrop(encounterId, info)
+  if type(info) ~= "table" or ns.IsSecret(info) then return nil end
+  local key = num(info.lootListKey)
+  local link = str(info.itemHyperlink)
+  local itemId = link and tonumber(link:match("item:(%d+)") or "")
+  if not key or not itemId then return nil end
+  local d = { key = key, encounterId = encounterId, itemId = itemId }
+  local name = link:match("|h%[(.-)%]|h") or link:match("%[(.-)%]")
+  if name and name ~= "" then d.name = name end
+  if plain(info.allPassed) == true then d.allPassed = true end
+  d.winner = readRoll(info.winner, false)
+  local rolls = info.rollInfos
+  if type(rolls) == "table" and not ns.IsSecret(rolls) then
+    local list = {}
+    for _, r in ipairs(rolls) do
+      if #list >= MAX_ROLLS then break end
+      local e = readRoll(r, true)
+      if e then list[#list + 1] = e end
+    end
+    if #list > 0 then d.rolls = list end
+  end
+  return d
+end
+R.ReadDrop = readDrop
+
+-- The lootListKeys on the character's newest closed runs.
+local function closedKeys(s)
+  local keys = {}
+  local list = s and s.list or {}
+  for i = #list, math.max(1, #list - CLOSED_KEYS_FROM + 1), -1 do
+    local r = list[i]
+    for _, d in ipairs(type(r) == "table" and type(r.drops) == "table" and r.drops or {}) do
+      if type(d) == "table" and d.key ~= nil then keys[d.key] = true end
+    end
+  end
+  return keys
+end
+
+-- Files one reading on the run: replacing the drop with the same encounter and key, or added (at most
+-- MAX_DROPS, oldest first). Whether anything changed.
+local function fileDrop(run, d, taken, onlyKnown)
+  if not d then return false end
+  if type(run.drops) ~= "table" then run.drops = {} end
+  for i, old in ipairs(run.drops) do
+    if type(old) == "table" and old.key == d.key and old.encounterId == d.encounterId then
+      d.at = old.at
+      run.drops[i] = d
+      return true
+    end
+  end
+  if onlyKnown or taken[d.key] or #run.drops >= MAX_DROPS then return false end
+  d.at = ns.Now()
+  run.drops[#run.drops + 1] = d
+  return true
+end
+
+local function readOne(run, encounterId, key, taken, fallback, onlyKnown)
+  local info = ns.Try(ns.Fn("C_LootHistory", "GetSortedInfoForDrop"), encounterId, key)
+  if type(info) ~= "table" or ns.IsSecret(info) then info = fallback end
+  return fileDrop(run, readDrop(encounterId, info), taken, onlyKnown)
+end
+
+-- Every drop of one encounter, read again (onlyKnown: only those already on the run).
+local function readEncounter(run, encounterId, taken, onlyKnown)
+  local drops = ns.Try(ns.Fn("C_LootHistory", "GetSortedDropsForEncounter"), encounterId)
+  if type(drops) ~= "table" or ns.IsSecret(drops) then return false end
+  local any = false
+  for _, d in ipairs(drops) do
+    local key = type(d) == "table" and not ns.IsSecret(d) and num(d.lootListKey)
+    if key and readOne(run, encounterId, key, taken, d, onlyKnown) then any = true end
+  end
+  return any
+end
+
+-- The encounters of the run's drops (and, withBosses, of its bosses).
+local function encounters(run, withBosses)
+  local out, seenIds = {}, {}
+  local function add(list)
+    for _, e in ipairs(type(list) == "table" and list or {}) do
+      local id = type(e) == "table" and e.encounterId
+      if type(id) == "number" and not seenIds[id] then
+        seenIds[id] = true
+        out[#out + 1] = id
+      end
+    end
+  end
+  add(run.drops)
+  if withBosses then add(run.bosses) end
+  return out
+end
+
+-- The run's drops read again (on pausing and closing, under ns.Run): only those already on it, so
+-- nothing the character didn't see while inside is taken then.
+readAllDrops = function(run, s, onlyKnown)
+  if not on() or not ns.Fn("C_LootHistory", "GetSortedDropsForEncounter") then return end
+  local taken = closedKeys(s)
+  local any = false
+  for _, id in ipairs(encounters(run, onlyKnown == false)) do
+    if readEncounter(run, id, taken, onlyKnown ~= false) then any = true end
+  end
+  if any then changed() end
+end
+
+local function insideWithStore()
+  local run, s = openRun()
+  if not on() or not run or not run.insideSince then return nil end
+  return run, s
+end
+
+function R.OnLootDrop(encounterId, key)
+  local run, s = insideWithStore()
+  encounterId, key = num(encounterId), num(key)
+  if not run or not encounterId or not key then return end
+  if readOne(run, encounterId, key, closedKeys(s)) then changed() end
+end
+
+function R.OnLootEncounter(encounterId)
+  local run, s = insideWithStore()
+  encounterId = num(encounterId)
+  if not run or not encounterId then return end
+  if readEncounter(run, encounterId, closedKeys(s)) then changed() end
+end
+
+-- LOOT_ROLLS_COMPLETE names only the key: the drop it is, read again (or, for a key the run hasn't seen,
+-- every encounter of the run's bosses and drops, new drops taken).
+function R.OnRollsComplete(key)
+  local run, s = insideWithStore()
+  key = num(key)
+  if not run or not key then return end
+  for _, d in ipairs(type(run.drops) == "table" and run.drops or {}) do
+    if type(d) == "table" and d.key == key then
+      if readOne(run, d.encounterId, key, closedKeys(s)) then changed() end
+      return
+    end
+  end
+  readAllDrops(run, s, false)
+end
+
 -- The meter ---------------------------------------------------------------------------------------
 --
 -- After each fight inside, the game's damage meter (C_DamageMeter) is asked for the fights it holds
@@ -1250,3 +1492,7 @@ ns.On("PLAYER_DEAD", function() R.OnDeath() end)
 ns.On("UPDATE_INVENTORY_DURABILITY", function() R.OnDurability() end)
 ns.On("GROUP_ROSTER_UPDATE", function() R.OnRoster() end)
 ns.On("DAMAGE_METER_RESET", function() R.OnMeterReset() end)
+-- The modern loot history's events (each refused, and so skipped, on a client without it).
+ns.On("LOOT_HISTORY_UPDATE_DROP", function(_, encounterId, key) R.OnLootDrop(encounterId, key) end)
+ns.On("LOOT_HISTORY_UPDATE_ENCOUNTER", function(_, encounterId) R.OnLootEncounter(encounterId) end)
+ns.On("LOOT_ROLLS_COMPLETE", function(_, key) R.OnRollsComplete(key) end)

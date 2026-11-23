@@ -14,6 +14,8 @@
 --   V.Card(run, opts)      the card's bar, rows and splits (and V.CardLines for the strip's tooltip)
 --   V.Summary(run, opts)   the summary's head, tiles, drops and last line
 --   V.Tiles(list, totals), V.DungeonRows(instances, list, totals, open)   Dungeons › Runs
+--   V.BossDrops(run, opts) the items rolled for, by boss: the item, the winner's line, every roll
+--   V.WinnerText(drop, opts), V.RollLines(drop, opts)   one drop's words ("Sam Hammiche · Need 23")
 --
 -- opts.capped is "no experience possible here" (the level cap): experience and kills leave, drops take
 -- their place (the game gives no kill count without experience).
@@ -217,6 +219,16 @@ function V.Card(run, opts)
   local fastest = type(cmp.fastest) == "table" and cmp.fastest or nil
   local splits = fastest and tab(fastest.splits) or {}
   local killedHere = {}
+  -- Each boss's drops, under its first kill (the item and who won it; the rolls are the summary's).
+  local dropsOf, dropsShown = {}, {}
+  for _, g in ipairs(V.BossDrops(run, { itemInfo = opts.itemInfo })) do dropsOf[g.encounterId] = g.drops end
+  local function addDrops(id)
+    if dropsShown[id] or not dropsOf[id] then return end
+    dropsShown[id] = true
+    for _, d in ipairs(dropsOf[id]) do
+      c.splits[#c.splits + 1] = { state = "drop", name = d.name, quality = d.quality, time = d.winner }
+    end
+  end
   for _, b in ipairs(tab(run.bosses)) do
     if type(b) == "table" then
       local name = b.name or string.format(L["boss %s"], tostring(b.encounterId))
@@ -230,9 +242,17 @@ function V.Card(run, opts)
           s.tone = s.diff < 0 and "good" or (s.diff > 0 and "bad" or nil)
         end
         c.splits[#c.splits + 1] = s
+        addDrops(b.encounterId)
       else
         c.splits[#c.splits + 1] = { state = "wipe", name = name, time = L["wipe"], tone = "bad" }
       end
+    end
+  end
+  -- Drops of a boss this run has no kill of (an end the addon didn't hear).
+  for _, g in ipairs(V.BossDrops(run, { itemInfo = opts.itemInfo })) do
+    if not dropsShown[g.encounterId] then
+      c.splits[#c.splits + 1] = { state = "boss", name = g.name, time = "" }
+      addDrops(g.encounterId)
     end
   end
   if type(run.pulling) == "table" then
@@ -276,7 +296,7 @@ function V.CardLines(c)
   for _, s in ipairs(c.splits) do
     local right = s.time
     if s.diffText then right = right .. "  " .. V.Tone(s.diffText, s.tone) end
-    out[#out + 1] = { V.Mark(s.state) .. s.name, right }
+    out[#out + 1] = { V.SplitLeft(s), right }
   end
   if c.note then out[#out + 1] = { c.note } end
   return out
@@ -293,12 +313,130 @@ function V.Mark(state)
   return MARKS[state] or ""
 end
 
+-- A split's left side: its mark and name, a drop indented in its item quality's colour.
+function V.SplitLeft(s)
+  if s.state == "drop" then return "   " .. V.Quality(s.quality) .. tostring(s.name) .. "|r" end
+  return V.Mark(s.state) .. tostring(s.name)
+end
+
+-- "|cffRRGGBB" for an item quality and a class, from Ryna's window API (white without it).
+function V.Quality(q)
+  local RW = ns.API.Window
+  if q ~= nil and type(RW) == "table" and type(RW.QualityColor) == "function" then
+    local c = ns.Try(RW.QualityColor, q)
+    if type(c) == "string" then return c end
+  end
+  return "|cffffffff"
+end
+
+function V.ClassColour(class)
+  local RW = ns.API.Window
+  if type(class) == "string" and type(RW) == "table" and type(RW.ClassColor) == "function" then
+    local c = ns.Try(RW.ClassColor, class)
+    if type(c) == "string" then return c end
+  end
+  return nil
+end
+
 local TONES = { good = "|cff40ff40", bad = "|cffff6060", dim = "|cff9d9d9d" }
 
 function V.Tone(text, tone)
   local c = TONES[tone]
   if not c or text == nil or text == "" then return text or "" end
   return c .. text .. "|r"
+end
+
+-- Loot rolls ------------------------------------------------------------------------------------------
+--
+-- A run's `drops` (Runs.lua) in words: the item, then its winner and roll ("Sam Hammiche · Need 23";
+-- "Everyone passed"; "Rolling" while undecided, "No winner recorded" on a closed run), and every roll
+-- (the winner ticked, the player's own "(you)"). opts.colour: names in their class colours.
+
+local N = ns.N
+local CHOICES = { need = N("Need"), offspec = N("Off-spec"), transmog = N("Transmog"), greed = N("Greed"),
+  none = N("No roll yet"), pass = N("Pass") }
+
+-- What one roll chose, and its number: "Need 23", "Pass", "23", or nil.
+function V.Choice(r)
+  r = tab(r)
+  local word = CHOICES[r.type] and L[CHOICES[r.type]] or nil
+  local n = type(r.roll) == "number" and tostring(math.floor(r.roll)) or nil
+  if word and n then return word .. " " .. n end
+  return word or n
+end
+
+-- Who rolled: the name as the game gave it ("Sam Hammiche"), "(you)" for the player's own.
+local function who(r, colour)
+  local name = type(r.name) == "string" and r.name or nil
+  if name and colour then
+    local c = V.ClassColour(r.class)
+    if c then name = c .. name .. "|r" end
+  end
+  if r.self then name = name and string.format(L["%s (you)"], name) or L["You"] end
+  return name
+end
+
+function V.WinnerText(drop, opts)
+  drop, opts = tab(drop), opts or {}
+  if type(drop.winner) == "table" then
+    local w = drop.winner
+    local name, choice = who(w, opts.colour), V.Choice(w)
+    if name and choice then return name .. " · " .. choice end
+    return name or choice or L["Won"]
+  end
+  if drop.allPassed then return L["Everyone passed"] end
+  return opts.closed and L["No winner recorded"] or L["Rolling"]
+end
+
+-- Every roll as { left, right }: the winner ticked, then who; what they chose and their number.
+function V.RollLines(drop, opts)
+  opts = opts or {}
+  local out = {}
+  for _, r in ipairs(tab(tab(drop).rolls)) do
+    if type(r) == "table" then
+      local name = who(r, opts.colour) or L["Someone"]
+      out[#out + 1] = { (r.won and MARKS.kill or "") .. name, V.Choice(r) or "" }
+    end
+  end
+  return out
+end
+
+-- The run's drops by boss, in the order the bosses were met (drops of a boss the run never heard end
+-- after them): { { encounterId, name, drops = { { itemId, name, quality, winner, rolls, drop } } } }.
+-- opts = { itemInfo = function(id) -> name, quality; closed; colour }
+function V.BossDrops(run, opts)
+  opts = opts or {}
+  local groups, byId = {}, {}
+  local names = {}
+  for _, b in ipairs(tab(tab(run).bosses)) do
+    if type(b) == "table" and b.encounterId ~= nil and names[b.encounterId] == nil then
+      names[b.encounterId] = b.name or false
+      groups[#groups + 1] = { encounterId = b.encounterId, drops = {} }
+      byId[b.encounterId] = groups[#groups]
+    end
+  end
+  for _, d in ipairs(tab(tab(run).drops)) do
+    if type(d) == "table" and d.encounterId ~= nil and d.itemId ~= nil then
+      local g = byId[d.encounterId]
+      if not g then
+        g = { encounterId = d.encounterId, drops = {} }
+        groups[#groups + 1] = g
+        byId[d.encounterId] = g
+      end
+      local name, quality
+      if type(opts.itemInfo) == "function" then name, quality = opts.itemInfo(d.itemId) end
+      g.drops[#g.drops + 1] = { itemId = d.itemId, name = name or d.name or string.format(L["item %s"],
+        tostring(d.itemId)), quality = quality, winner = V.WinnerText(d, opts), rolls = V.RollLines(d, opts), drop = d }
+    end
+  end
+  local out = {}
+  for _, g in ipairs(groups) do
+    if #g.drops > 0 then
+      g.name = names[g.encounterId] or string.format(L["boss %s"], tostring(g.encounterId))
+      out[#out + 1] = g
+    end
+  end
+  return out
 end
 
 -- The summary ---------------------------------------------------------------------------------------
@@ -436,6 +574,8 @@ function V.Summary(run, opts)
   if not closed and run.paused then
     s.note = string.format(L["Go back in within %s and this run carries on."], V.Clock(V.TimeLeft(run)))
   end
+  -- The items rolled for, by boss.
+  s.loot = V.BossDrops(run, { itemInfo = opts.itemInfo, closed = closed, colour = opts.colour })
   return s
 end
 

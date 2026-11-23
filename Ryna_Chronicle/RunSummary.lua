@@ -4,10 +4,11 @@
 -- The summary (runSummary, on): each time the character walks out of the instance (the run pauses), the
 -- run so far against this character's earlier runs of the dungeon: time (best, or the difference from
 -- the fastest), experience, worth, kills and bosses, deaths, the run's own damage and healing
--- (runSummaryMeter, when the game's meter gave them), the two most valuable drops and a last line of the
--- rest. It says "so far" until the run closes; a run that closes while it is up is shown closed. It
--- goes when the character goes back in, and on Close or Escape. "Open in Ryna" opens Dungeons › Runs.
--- A run row there opens the same frame on that run.
+-- (runSummaryMeter, when the game's meter gave them), the two most valuable drops, a last line of the
+-- rest, and the items the group rolled for under each boss: the item and who won it with their roll,
+-- and on hover the item's own tooltip and every roll. It says "so far" until the run closes; a run
+-- that closes while it is up is shown closed. It goes when the character goes back in, and on Close or
+-- Escape. "Open in Ryna" opens Dungeons › Runs. A run row there opens the same frame on that run.
 --
 -- The first-time choice: the first time on the account that a character enters a dungeon or raid while
 -- runDisplay was never set, one notice offers a thin strip, a card or neither, and says where to change
@@ -31,6 +32,8 @@ local D = ns.RunDisplay
 local WIDTH = 380
 local PAD = 10
 local TILE_H = 44
+local LOOT_LINE = 14
+local MAX_LOOT_LINES = 24 -- bosses and drops shown; past it, one line counts the rest
 
 -- CreateFrame with the first template this client has (none, last).
 local function create(kind, name, parent, templates)
@@ -119,7 +122,7 @@ function S.Model(run, closed)
   return V.Summary(run, {
     closed = closed, compare = ns.Runs.Compare(run), capped = D.Capped() and true or false,
     meter = ns.Setting("runSummaryMeter") and true or false,
-    index = V.RunIndex(run, list, ns.Runs.Totals()), top = top, itemInfo = S.ItemInfo,
+    index = V.RunIndex(run, list, ns.Runs.Totals()), top = top, itemInfo = S.ItemInfo, colour = true,
   })
 end
 
@@ -150,6 +153,7 @@ local function buildSummary()
     f.drops[i] = { name = D.FontString(f, "GameFontHighlightSmall", "LEFT"),
       value = D.FontString(f, "GameFontHighlightSmall", "RIGHT") }
   end
+  f.lootLines = {}
   f.rest = wrapped(f, "GameFontDisableSmall", inner)
   f.note = wrapped(f, "GameFontHighlightSmall", inner)
   f.close = button(f, L["Close"], 80)
@@ -195,6 +199,80 @@ local function qualityColour(q)
   return "|cffffffff"
 end
 
+-- One drop's hover: the item's own tooltip (from its id), then who won and every roll.
+function S.DropTooltip(row)
+  local tip, d = _G.GameTooltip, row.drop
+  if not tip or type(d) ~= "table" then return end
+  tip:SetOwner(row, "ANCHOR_RIGHT")
+  tip:ClearLines()
+  local linked = d.itemId ~= nil and pcall(tip.SetHyperlink, tip, "item:" .. tostring(d.itemId))
+  if not linked then tip:AddLine(qualityColour(d.quality) .. d.name .. "|r") end
+  tip:AddLine(" ")
+  tip:AddLine(d.winner, 1, 0.82, 0)
+  for _, l in ipairs(d.rolls or {}) do tip:AddDoubleLine(l[1], l[2], 1, 1, 1, 0.8, 0.8, 0.8) end
+  tip:Show()
+end
+
+-- A loot line: a boss's name, or a drop (hovered for its rolls); made the first time it is needed.
+local function lootLine(f, i)
+  local l = f.lootLines[i]
+  if l then return l end
+  l = create("Frame", nil, f)
+  l:SetSize(WIDTH - 2 * PAD, LOOT_LINE)
+  l:EnableMouse(true)
+  l.left = D.FontString(l, "GameFontHighlightSmall", "LEFT")
+  l.left:SetPoint("LEFT", l, "LEFT", 0, 0)
+  l.right = D.FontString(l, "GameFontHighlightSmall", "RIGHT")
+  l.right:SetPoint("RIGHT", l, "RIGHT", 0, 0)
+  l:SetScript("OnEnter", function(self)
+    if self.drop then ns.Run("run summary drop", S.DropTooltip, self) end
+  end)
+  l:SetScript("OnLeave", function(self)
+    local tip = _G.GameTooltip
+    if self.drop and tip and tip.Hide then tip:Hide() end
+  end)
+  f.lootLines[i] = l
+  return l
+end
+
+-- The loot lines from y down; the y below them. Past MAX_LOOT_LINES the last line counts the items
+-- left out.
+local function drawLoot(f, loot, y)
+  local n, items, shownItems = 0, 0, 0
+  for _, g in ipairs(loot or {}) do items = items + #g.drops end
+  local function put(left, right, drop)
+    n = n + 1
+    local l = lootLine(f, n)
+    l:ClearAllPoints()
+    l:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+    l.left:SetText(left)
+    l.right:SetText(right or "")
+    l.drop = drop
+    l:Show()
+    y = y - LOOT_LINE
+  end
+  local room = MAX_LOOT_LINES - 1 -- one kept for the count
+  for _, g in ipairs(loot or {}) do
+    if n + 2 > room then break end -- a boss's name only with at least one of its drops
+    put("|cffffd100" .. g.name .. "|r")
+    for _, d in ipairs(g.drops) do
+      if n >= room then break end
+      put("   " .. qualityColour(d.quality) .. d.name .. "|r", V.Tone(d.winner, "dim"), d)
+      shownItems = shownItems + 1
+    end
+  end
+  if shownItems < items then
+    put(V.Tone(ns.Plural(items - shownItems, L["%d more item rolled for"], L["%d more items rolled for"]), "dim"))
+  end
+  for i = n + 1, #f.lootLines do
+    f.lootLines[i].drop = nil
+    f.lootLines[i]:Hide()
+  end
+  if n > 0 then y = y - 4 end
+  return y
+end
+S.DrawLoot = drawLoot
+
 function S.Draw(m)
   local f = S.frame
   if not f then return end
@@ -235,6 +313,7 @@ function S.Draw(m)
       d.value:Hide()
     end
   end
+  y = drawLoot(f, m.loot, y - (#(m.loot or {}) > 0 and 4 or 0))
   for _, part in ipairs({ { f.rest, m.rest }, { f.note, m.note } }) do
     local fs, text = part[1], part[2]
     if text and text ~= "" then
