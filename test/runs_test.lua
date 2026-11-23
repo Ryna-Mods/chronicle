@@ -528,6 +528,56 @@ check(#events() == 6 and lastEvent().leftAt == loggedOut and lastEvent().seconds
   "a login hours later closes it at the logout")
 check(R.Current() and R.Current().seconds == 0 and R.Current().entries == 1, "and opens a new one")
 
+-- Another group: back in the same dungeon with nobody from the run in the group is another copy
+-- (The Stockade, 2026-11-23: nobody reset anything, and the old run's clock went on). ----------------
+local guidOf, nameOf = _G.UnitGUID, _G.UnitName
+local mate = "Player-91-00B3E9D1"
+_G.UnitGUID = function(unit)
+  if unit == "party1" then return mate end
+  return guidOf(unit)
+end
+local groupBase = #events()
+local runA = R.Current().id
+now = now + 100
+leave()
+now = now + 50
+enter(BFD)
+check(#events() == groupBase and R.Current().id == runA and R.Current().entries == 2,
+  "out and back in with the same group resumes")
+now = now + 10
+leave()
+group = 1
+fire("GROUP_ROSTER_UPDATE")
+now = now + 20
+enter(BFD)
+check(#events() == groupBase and R.Current().id == runA and R.Current().entries == 3, "back in alone resumes")
+now = now + 10
+leave()
+local leftA = now
+group, mate = 2, "Player-91-0FFFFFFF"
+fire("GROUP_ROSTER_UPDATE")
+now = now + 60
+enter(BFD)
+check(#events() == groupBase + 1 and lastEvent().id == runA and lastEvent().leftAt == leftA
+  and lastEvent().seconds == 120, "another group closes it, left when walked out")
+cur = R.Current()
+check(cur and cur.id ~= runA and cur.entries == 1 and cur.seconds == 0, "and a new run opens for the new group")
+check(lastEvent().mates == nil and lastEvent().matesOut == nil and runs().list[#runs().list].mates == nil,
+  "who the run was with never leaves the open run")
+for k in pairs(runs().open.mates) do
+  check(type(k) == "number", "the open run keeps a hash, never a GUID or a name")
+end
+local runB = cur.id
+now = now + 30
+leave()
+mate = SECRET
+_G.UnitName = function() return SECRET end
+fire("GROUP_ROSTER_UPDATE")
+now = now + 30
+enter(BFD)
+check(#events() == groupBase + 1 and R.Current().id == runB, "a member who can't be read changes nothing")
+_G.UnitGUID, _G.UnitName, mate = guidOf, nameOf, nil
+
 -- Secrets in the instance's answer: no run is guessed. -----------------------------------------------
 leave()
 fire("CHAT_MSG_SYSTEM", "Blackfathom Deeps has been reset.")

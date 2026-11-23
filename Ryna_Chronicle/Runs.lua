@@ -4,12 +4,22 @@
 -- Lifecycle. A run opens on PLAYER_ENTERING_WORLD or ZONE_CHANGED_NEW_AREA inside a party or raid
 -- instance when no open run matches. It pauses when the character is outside (time outside is not
 -- counted) and resumes on coming back to the same map. It closes when the character enters another
--- instance, when the game says the instance was reset (INSTANCE_RESET_SUCCESS, while outside), or
--- after 30 minutes outside (or at a login after that long). Nothing that happens inside ends a run:
+-- instance, when the game says the instance was reset (INSTANCE_RESET_SUCCESS, while outside), when
+-- the character comes back in another group (below), or after 30 minutes outside (or at a login after
+-- that long). Nothing that happens inside ends a run:
 -- a corpse whose GUID carries another copy id and a boss pulled again after its kill were both rules
 -- once, and runs started over mid-clear in game (2026-11-21). A closed run is never reopened. The copy
 -- id is the first looted corpse's (GetLootSourceInfo is plain inside; a unit's GUID is secret there);
 -- other ids on the run's corpses are counted in `otherCopies`, so the data can say what the field is.
+--
+-- Another group. A copy belongs to its group, and nothing tells an addon that the copy it walked into
+-- is a new one: nobody resets anything when a character leaves one group and joins the next, and the
+-- old run's clock went on in the new group's dungeon (The Stockade, 2026-11-23). So the open run keeps
+-- who it was with (`mates`: every other member seen while it was open, each as a hash of their GUID or
+-- name, never the GUID or the name; `matesOut`: the group as last read while outside), and coming back
+-- to the same map in a group with nobody from it closes the run where the character walked out and
+-- opens a new one. Alone on either side, or a member who can't be read, changes nothing: a run is
+-- never cut on a guess. Neither field leaves the open run (not in the event, not on a closed run).
 --
 -- Storage: RynaDB.chronicle.runs[guid] = { open = <the open run>, list = { <closed runs, oldest first,
 -- the newest 100> }, totals = { [mapId] = { instance, runs, seconds, xp, fastest, fastestId, last } } },
@@ -293,6 +303,49 @@ local function readParty()
   return { size = math.max(size, #members + 1), members = members }
 end
 
+-- The other members of the group as a set of hashes (of the GUID, else the name), for telling one
+-- group from another without keeping who they were; an empty set alone, nil when a member can't be
+-- read (secret, or not loaded yet).
+local function hash(text)
+  local h = 5381
+  for i = 1, #text do h = (h * 33 + text:byte(i)) % 2147483647 end
+  return h
+end
+
+local function readMates()
+  local raid = plain(ns.Try(ns.Fn("IsInRaid"))) == true
+  local exists, isUnit = ns.Fn("UnitExists"), ns.Fn("UnitIsUnit")
+  local set, n = {}, 0
+  for i = 1, raid and 40 or 4 do
+    local unit = (raid and "raid" or "party") .. i
+    if exists and plain(ns.Try(exists, unit)) == true and plain(ns.Try(isUnit, unit, "player")) ~= true then
+      local id = str(ns.Try(ns.Fn("UnitGUID"), unit)) or playerName(unit)
+      if not id then return nil end
+      set[hash(id)] = true
+      n = n + 1
+    end
+  end
+  local size = num(ns.Try(ns.Fn("GetNumGroupMembers"))) or 0
+  if size - 1 > n then return nil end
+  return set
+end
+
+local function addMates(run, set)
+  if type(set) ~= "table" then return end
+  if type(run.mates) ~= "table" then run.mates = {} end
+  for k in pairs(set) do run.mates[k] = true end
+end
+
+-- Whether `set` is a group with nobody of the run's in it (both with someone in them).
+local function otherGroup(run, set)
+  if type(set) ~= "table" or type(run.mates) ~= "table" then return false end
+  if next(set) == nil or next(run.mates) == nil then return false end
+  for k in pairs(set) do
+    if run.mates[k] then return false end
+  end
+  return true
+end
+
 -- The game's damage meter: the fights it holds, as session ids.
 local function meterIds()
   local list = ns.Try(ns.Fn("C_DamageMeter", "GetAvailableCombatSessions"))
@@ -501,7 +554,7 @@ local function newRun(s, here)
     level = { from = lvl, to = lvl }, xp = { total = 0, kills = 0, quests = 0, rested = 0 },
     kills = { n = 0, creatures = {} }, bosses = {}, loot = { n = 0, qty = 0, byQuality = {}, items = {} },
     coin = 0, durability = { lost = 0, of = of }, deaths = 0, quests = {}, rep = {}, party = readParty(),
-    meterSkip = idSet(meterIds()), meterDone = {},
+    meterSkip = idSet(meterIds()), meterDone = {}, mates = readMates() or {},
   }
   s.open = run
   seen.n, seen.set = 0, {}
@@ -635,14 +688,19 @@ local function pause(run, at)
   run.outsideSince = at
   stopCombat(run, at)
   run.pull = nil
+  -- The group walked out with is the run's still; who it is with from here on is matesOut's to say.
+  run.matesOut = readMates()
+  addMates(run, run.matesOut)
   if base.run == run then base.run = nil end
   changed("pause")
   arm()
 end
 
-local function resume(run, entry)
+local function resume(run, entry, mates)
   run.insideSince = ns.Now()
   run.outsideSince = nil
+  run.matesOut = nil
+  addMates(run, mates)
   if entry then run.entries = n0(run.entries) + 1 end
   baseline(run)
   changed("resume")
@@ -676,6 +734,15 @@ function R.Check()
     close(s, run, run.outsideSince)
     run = nil
   end
+  -- Back in the same dungeon with a group none of the run's is in: another copy (the header).
+  local mates
+  if run and not run.insideSince then
+    mates = readMates() or run.matesOut
+    if otherGroup(run, mates) then
+      close(s, run, run.outsideSince)
+      run = nil
+    end
+  end
   if not run then
     newRun(s, here)
     return
@@ -683,7 +750,7 @@ function R.Check()
   run.difficulty = here.difficulty or run.difficulty
   run.instance = run.instance or here.name
   if not run.insideSince then
-    resume(run, true)
+    resume(run, true, mates)
   elseif base.run ~= run then
     baseline(run) -- after a /reload inside: the same stretch goes on
   end
@@ -966,8 +1033,15 @@ end
 
 -- The group, the biggest seen inside: a member walking out at the end doesn't shrink it.
 function R.OnRoster()
+  local open = on() and openRun() or nil
+  if open and not open.insideSince then
+    local mates = readMates() -- outside: who the character is with now, for when it goes back in
+    if mates then open.matesOut = mates end
+    return
+  end
   local run = inside()
   if not run then return end
+  addMates(run, readMates())
   local p = readParty()
   if type(run.party) ~= "table" or p.size >= n0(run.party.size) then
     run.party = p
