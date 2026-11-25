@@ -8,6 +8,8 @@
 --   card   the same, larger: the experience bar, the run's numbers and each boss's split against the
 --          fastest run here, with the items rolled for under the boss that dropped them and who won each.
 --
+-- A right-click on either opens a menu of one thing, Start a new run (D.Menu, below).
+--
 -- One frame (RynaChronicleRun), dragged with the left button, held by its top left corner so the card
 -- grows downwards, its place kept in RynaDB.settings.runDisplayPos { x, y } (the corner, from the
 -- screen's bottom left). The words are RunView.lua's; this file only draws them. The timer ticks once a
@@ -188,6 +190,9 @@ local function build()
   f:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
     ns.Run("run display place", savePlace, self)
+  end)
+  f:SetScript("OnMouseUp", function(self, button)
+    if button == "RightButton" then ns.Run("run display menu", D.Menu, self) end
   end)
   f:SetScript("OnEnter", function(self)
     self.hovered = true
@@ -374,6 +379,36 @@ function D.Tick()
   if D.frame and D.frame:IsShown() and D.view and not D.example then D.Draw() end
 end
 
+-- A right-click on the strip or the card: a menu of one thing, starting a new run (Runs.StartNew), for
+-- the new copy of a dungeon the run didn't notice. A menu and not the click itself, so a stray click
+-- in a fight ends nothing. On a client without the menu, the click answers in chat and a second one
+-- within ASK_WINDOW seconds does it. Never on the example (/ryna runs test) or with no run open.
+local ASK_WINDOW = 10
+local askedAt = nil
+
+function D.StartNew()
+  askedAt = nil
+  return ns.Runs.StartNew()
+end
+
+function D.Menu(f)
+  local run = not D.example and ns.Runs.Current()
+  if not run then return end
+  local label = L["Start a new run"]
+  local make = _G.MenuUtil and _G.MenuUtil.CreateContextMenu
+  if type(make) == "function" then
+    local ok = pcall(make, f, function(_, root)
+      root:CreateTitle(tostring(run.instance or L["Dungeon"]))
+      root:CreateButton(label, function() ns.Run("run display new", D.StartNew) end)
+    end)
+    if ok then return end
+  end
+  local now = ns.Now()
+  if askedAt and now - askedAt <= ASK_WINDOW then return D.StartNew() end
+  askedAt = now
+  ns.Print(string.format(L["Right-click the run again within %d seconds to end it and start a new one."], ASK_WINDOW))
+end
+
 -- The strip's hover: the card's detail.
 function D.ShowTooltip(f)
   local tip = _G.GameTooltip
@@ -388,6 +423,7 @@ function D.ShowTooltip(f)
       tip:AddLine(l[1], 0.6, 0.6, 0.6, true)
     end
   end
+  if not D.example then tip:AddLine(L["Right-click: start a new run."], 0.6, 0.6, 0.6, true) end
   tip:Show()
 end
 

@@ -248,6 +248,88 @@ eq(settings.runDisplay, "off", "a click steps it on: card, then neither")
 F.Click(control)
 eq(settings.runDisplay, "strip", "then a thin strip")
 
+-- Starting a new run by hand: the display's right-click, and /ryna runs new. -------------------------------
+do
+  local function last() return F.Plain(F.chat[#F.chat]) end
+  H.Leave()
+  H.Later(31 * 60)
+  F.RunTimers()
+  H.Enter(H.DM)
+  local first = R.Current()
+  check(first ~= nil and f:IsShown(), "a run is open and on screen")
+  H.Later(40)
+  f._scripts.OnEnter(f)
+  local hint = false
+  for _, l in ipairs(GameTooltip.lines) do
+    if plain(l.left) == "Right-click: start a new run." then hint = true end
+  end
+  check(hint, "the hover says what a right-click does")
+  f._scripts.OnLeave(f)
+  -- The menu: nothing happens until its one button is chosen.
+  local menu
+  _G.MenuUtil = { CreateContextMenu = function(owner, make)
+    menu = { owner = owner, buttons = {} }
+    function menu:CreateTitle(t) self.title = t end
+    function menu:CreateButton(t, fn) self.buttons[#self.buttons + 1] = { text = t, fn = fn } end
+    make(owner, menu)
+  end }
+  local had, said = #R.List(), #F.chat
+  f._scripts.OnMouseUp(f, "LeftButton")
+  check(menu == nil, "a left click opens no menu")
+  f._scripts.OnMouseUp(f, "RightButton")
+  check(menu and menu.owner == f and menu.title == "The Deadmines", "a right-click opens a menu named for the dungeon")
+  check(#menu.buttons == 1 and menu.buttons[1].text == "Start a new run", "with one thing in it")
+  check(#R.List() == had and R.Current().id == first.id, "opening the menu ends nothing")
+  menu.buttons[1].fn()
+  F.RunTimers()
+  local second = R.Current()
+  check(#R.List() == had + 1 and R.List()[1].id == first.id, "chosen: the run closes as any run does")
+  eq(R.List()[1].seconds, 40, "with the time it had")
+  check(second and second.id ~= first.id and second.seconds == 0 and second.mapId == first.mapId,
+    "and a new one opens in the same step")
+  check(f:IsShown() and plain(f.strip:GetText()):find("The Deadmines  ·  0:00", 1, true) == 1,
+    "the strip starts again: " .. plain(f.strip:GetText()))
+  check(#F.chat == said, "nothing in chat")
+  -- A client without the menu: asked once in chat, done on the second click in time.
+  _G.MenuUtil = nil
+  H.Later(20)
+  f._scripts.OnMouseUp(f, "RightButton")
+  check(last():find("Right-click the run again within 10 seconds", 1, true) ~= nil and R.Current().id == second.id,
+    "no menu on this client: the first right-click only asks")
+  H.Later(11)
+  f._scripts.OnMouseUp(f, "RightButton")
+  check(R.Current().id == second.id, "too late, and it asks again")
+  H.Later(2)
+  f._scripts.OnMouseUp(f, "RightButton")
+  F.RunTimers()
+  check(R.Current().id ~= second.id and R.List()[1].id == second.id, "twice in time: a new run")
+  -- The example is never a run to end.
+  D.Test()
+  local third = R.Current().id
+  f._scripts.OnMouseUp(f, "RightButton")
+  f._scripts.OnMouseUp(f, "RightButton")
+  check(R.Current().id == third, "the example (/ryna runs test) takes no right-click")
+  D.Test()
+  -- /ryna runs new, inside, paused outside, and with no run.
+  H.Later(5)
+  SlashCmdList.RYNA("runs new")
+  F.RunTimers()
+  check(last():find("That run is closed", 1, true) ~= nil and R.Current().id ~= third, "/ryna runs new does the same")
+  H.Later(50)
+  H.Leave()
+  local paused, n = R.Current().id, #R.List()
+  H.Later(120)
+  SlashCmdList.RYNA("runs new")
+  F.RunTimers()
+  check(R.Current() == nil and #R.List() == n + 1, "outside, the paused run closes and none opens")
+  local closed = R.List()[1]
+  check(closed.id == paused and closed.seconds == 50 and closed.leftAt == closed.enteredAt + 50,
+    "closed where the character walked out")
+  check(not f:IsShown(), "and the display is gone")
+  SlashCmdList.RYNA("runs new")
+  check(last():find("No dungeon run is open.", 1, true) ~= nil, "with no run it says so")
+end
+
 -- /ryna runs forget: asked twice, and only then. ------------------------------------------------------------
 do
   local function last() return F.Plain(F.chat[#F.chat]) end
@@ -272,6 +354,6 @@ do
   check(last():find("no saved runs", 1, true) ~= nil, "nothing left: says so")
 end
 
-check(#F.chat - chatAtStart == 17, "nothing in chat but the answers to /ryna runs (" .. (#F.chat - chatAtStart) .. ")")
+check(#F.chat - chatAtStart == 22, "nothing in chat but the answers to /ryna runs (" .. (#F.chat - chatAtStart) .. ")")
 check(core.errors.count == 0, "no errors caught: " .. tostring(core.errors.last))
 H.done("run frames")

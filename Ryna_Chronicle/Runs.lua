@@ -6,7 +6,8 @@
 -- counted) and resumes on coming back to the same map. It closes when the character enters another
 -- instance, when the game says the instance was reset (INSTANCE_RESET_SUCCESS, while outside), when
 -- the character comes back in another group (below), when a boss it killed before walking out is
--- pulled after walking back in (below), or after 30 minutes outside (or at a login after that long).
+-- pulled after walking back in (below), after 30 minutes outside (or at a login after that long), or
+-- when the player says so (Runs.StartNew: the display's right-click, /ryna runs new).
 -- Nothing else that happens inside ends a run:
 -- a corpse whose GUID carries another copy id and a boss pulled again after its kill were both rules
 -- once, and runs started over mid-clear in game (2026-11-21). A closed run is never reopened. The copy
@@ -65,6 +66,9 @@
 --   Runs.Full(run)        whether a run killed every boss it pulled (and at least one)
 --   Runs.ForgetCount(what) / Runs.Forget(what)   "split" or "all": how many closed runs that is, and
 --                         forgetting them (the saved file only; /ryna runs forget asks first)
+--   Runs.StartNew()       the player says this is another run (the display's right-click, /ryna runs
+--                         new): the open run closes now (a paused one where the character walked out)
+--                         and, inside a dungeon, a new one opens with the same step; false with no run
 --   Runs.CurrentTop()     the open run's most valuable drops so far, priced now (as a closed run's
 --                         loot.top), for the summary on leaving
 --   Runs.RollType(state)  a loot roll's state as the wire's word ("need", "greed", ...), or nil
@@ -865,6 +869,20 @@ function R.Check()
   end
 end
 
+-- The player says so. Nothing the client tells an addon names a copy of a dungeon, so every rule above
+-- is a guess that can miss (a new copy where no old boss is pulled again, one entered alone): this is the
+-- way to say it by hand. What the run held closes as any run does; nothing is thrown away.
+function R.StartNew()
+  if not on() then return false end
+  local run, s = openRun()
+  if not run then return false end
+  close(s, run, run.outsideSince)
+  local kept = s.list[#s.list]
+  if kept and kept.id == run.id then kept.byHand = true end -- not a piece 0.7.0 cut off (splitIndexes)
+  R.Check()
+  return true
+end
+
 -- PLAYER_ENTERING_WORLD: after a logout (not a /reload) the time away was outside, so an open run
 -- that was inside is paused where the logout left it; then the usual check.
 function R.OnEnteringWorld(isInitialLogin, isReloadingUi)
@@ -1501,9 +1519,11 @@ end
 -- in the saved file: the open run stays, and what ryna.io already has stays there.
 --
 --   "split"  the pieces addon 0.7.0 cut off one visit: a run that the next run of the same map starts
---            within a second of the end of. The last run of such a chain wasn't cut off (it is the
---            rest of the visit, and ended as a run does), so it stays: the first use of this in game
---            took a real 35-minute run with it (2026-11-21).
+--            within a second of the end of. A run the player ended by hand (Runs.StartNew, `byHand`
+--            on the kept run, never in the event) is also followed at once, and is no such piece.
+--            The last run of such a chain wasn't cut off (it is the rest of the visit, and ended as a
+--            run does), so it stays: the first use of this in game took a real 35-minute run with it
+--            (2026-11-21).
 --   "all"    every closed run, and the totals of the runs folded out of the list
 
 -- The indexes (into `list`, oldest first as stored) of the runs "split" would forget.
@@ -1517,7 +1537,8 @@ local function splitIndexes(list)
   for k = 2, #order do
     local before, after = list[order[k - 1]], list[order[k]]
     local gap = after.enteredAt - n0(before.leftAt)
-    if before.mapId == after.mapId and type(before.leftAt) == "number" and gap >= 0 and gap <= 1 then
+    if before.mapId == after.mapId and type(before.leftAt) == "number" and gap >= 0 and gap <= 1
+      and not before.byHand then
       marked[order[k - 1]] = true
     end
   end

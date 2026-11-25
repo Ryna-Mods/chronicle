@@ -511,7 +511,14 @@ L["The run display is showing an example: drag it where you want it, then type /
 L["The example run is gone."] = nil
 L["The run display can't be drawn on this client."] = nil
 L["/ryna runs: your dungeon runs; /ryna runs strip, card or off: the live display; "
-  .. "/ryna runs test: place it; /ryna runs forget split or all: forget saved runs"] = nil
+  .. "/ryna runs test: place it; /ryna runs new: end this run and start a new one; "
+  .. "/ryna runs forget split or all: forget saved runs"] = nil
+-- The run display's right-click menu, its tooltip line, and /ryna runs new.
+L["Start a new run"] = nil
+L["Right-click: start a new run."] = nil
+L["Right-click the run again within %d seconds to end it and start a new one."] = nil
+L["That run is closed. A new one starts here, or when you next walk in."] = nil
+L["No dungeon run is open."] = nil
 L["/ryna runs forget split: the pieces an old version cut off a visit (its last part stays); "
   .. "/ryna runs forget all: every saved run of this character"] = nil
 L["No run here looks like part of a visit that was cut up."] = nil

@@ -11,6 +11,7 @@
 --   /ryna runs                 opens Dungeons
 --   /ryna runs strip|card|off  the live display (RunDisplay.lua)
 --   /ryna runs test            the chosen display with example numbers, to place it; again to hide it
+--   /ryna runs new             the open run ends and a new one starts (Runs.StartNew; the display's right-click)
 --
 -- With a core older than the window none of the section registers, and /ryna runs says so when typed.
 
@@ -118,7 +119,8 @@ end
 -- /ryna runs ------------------------------------------------------------------------------------------
 
 local HELP = L["/ryna runs: your dungeon runs; /ryna runs strip, card or off: the live display; "
-  .. "/ryna runs test: place it; /ryna runs forget split or all: forget saved runs"]
+  .. "/ryna runs test: place it; /ryna runs new: end this run and start a new one; "
+  .. "/ryna runs forget split or all: forget saved runs"]
 
 -- /ryna runs forget <split|all>: said once it tells how many runs that is, said again within this
 -- long it forgets them. Nothing is forgotten on one line of typing.
@@ -161,6 +163,11 @@ function Dn.Command(arg, rest)
   asked = nil
   if arg == "" then
     return ns.Window.Open(KEY)
+  end
+  if arg == "new" then
+    ns.Print(ns.Runs.StartNew() and L["That run is closed. A new one starts here, or when you next walk in."]
+      or L["No dungeon run is open."])
+    return
   end
   if arg == "strip" or arg == "card" or arg == "off" then
     D.SetDisplay(arg)
