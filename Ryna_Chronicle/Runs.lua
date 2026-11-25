@@ -5,8 +5,9 @@
 -- instance when no open run matches. It pauses when the character is outside (time outside is not
 -- counted) and resumes on coming back to the same map. It closes when the character enters another
 -- instance, when the game says the instance was reset (INSTANCE_RESET_SUCCESS, while outside), when
--- the character comes back in another group (below), or after 30 minutes outside (or at a login after
--- that long). Nothing that happens inside ends a run:
+-- the character comes back in another group (below), when a boss it killed before walking out is
+-- pulled after walking back in (below), or after 30 minutes outside (or at a login after that long).
+-- Nothing else that happens inside ends a run:
 -- a corpse whose GUID carries another copy id and a boss pulled again after its kill were both rules
 -- once, and runs started over mid-clear in game (2026-11-21). A closed run is never reopened. The copy
 -- id is the first looted corpse's (GetLootSourceInfo is plain inside; a unit's GUID is secret there);
@@ -20,6 +21,17 @@
 -- to the same map in a group with nobody from it closes the run where the character walked out and
 -- opens a new one. Alone on either side, or a member who can't be read, changes nothing: a run is
 -- never cut on a guess. Neither field leaves the open run (not in the event, not on a closed run).
+--
+-- The same group, a new copy. Only the leader is told of a reset: everyone else walks back into a new
+-- copy with the same people and nothing said (Dalaran, 2026-11-24: a full clear, 83 s outside, and the
+-- old clock went on). A dead boss can't be pulled, so a boss the run killed before the character walked
+-- out, pulled after it walked back in, is a new copy, and the run is cut where that walk back in was:
+-- what it held when it walked out is closed as left then, and what it gathered since is the new run,
+-- entered when it came back. For that the run keeps itself as it was at the walk back in (`was`: taken
+-- when it comes back with a boss killed since the last one taken, so a wipe's walk back never moves
+-- the cut), and `was` never leaves the open run. A pull that follows its own kill with no walk between
+-- (an encounter the game starts twice) is listed again, as before. A new copy in which no boss of the
+-- old one is pulled again is still one run.
 --
 -- Storage: RynaDB.chronicle.runs[guid] = { open = <the open run>, list = { <closed runs, oldest first,
 -- the newest 100> }, totals = { [mapId] = { instance, runs, seconds, xp, fastest, fastestId, last } } },
@@ -696,7 +708,24 @@ local function pause(run, at)
   arm()
 end
 
+-- How many bosses a run has killed.
+local function bossKills(run)
+  local n = 0
+  for _, b in ipairs(type(run.bosses) == "table" and run.bosses or {}) do
+    if type(b) == "table" and b.success then n = n + 1 end
+  end
+  return n
+end
+
 local function resume(run, entry, mates)
+  -- The run as it walks back in, for a cut here if this turns out to be a new copy (the header).
+  local kills = entry and bossKills(run) or 0
+  if kills > 0 and (type(run.was) ~= "table" or kills > n0(run.was.bossKills)) then
+    run.was = nil
+    local was = copy(run)
+    was.bossKills, was.backAt = kills, ns.Now()
+    run.was, run.backPullAt = was, nil
+  end
   run.insideSince = ns.Now()
   run.outsideSince = nil
   run.matesOut = nil
@@ -704,6 +733,86 @@ local function resume(run, entry, mates)
   if entry then run.entries = n0(run.entries) + 1 end
   baseline(run)
   changed("resume")
+end
+
+-- a - b for the numbers of two maps, keys that come to nothing left out.
+local function minus(a, b)
+  local out = {}
+  for k, v in pairs(type(a) == "table" and a or {}) do
+    local d = n0(v) - n0(type(b) == "table" and b[k])
+    if d ~= 0 then out[k] = d end
+  end
+  return out
+end
+
+local function tail(list, from)
+  local out = {}
+  for i = from + 1, #list do out[#out + 1] = list[i] end
+  return out
+end
+
+-- Cuts the open run where it last walked back in with `was` taken: `was` closes as left when it walked
+-- out, and the run goes on as a new one holding only what it gathered since.
+local function split(s, run)
+  local was = run.was
+  run.was = nil
+  if type(was) ~= "table" or not was.backAt then return end
+  accumulate(run)
+  local function less(x, y) return math.max(0, n0(x) - n0(y)) end
+  run.id = string.format("%d-%d", was.backAt, run.mapId)
+  run.enteredAt = was.backAt
+  run.seconds = less(run.seconds, was.seconds)
+  run.combatSeconds = less(run.combatSeconds, was.combatSeconds)
+  run.firstPullAt, run.backPullAt = run.backPullAt or ns.Now(), nil
+  run.entries = math.max(1, n0(run.entries) - n0(was.entries))
+  run.level = { from = type(was.level) == "table" and was.level.to or run.level.from, to = run.level.to }
+  for k, v in pairs(run.xp) do run.xp[k] = less(v, type(was.xp) == "table" and was.xp[k]) end
+  local wasKills = type(was.kills) == "table" and was.kills or {}
+  run.kills = { n = less(run.kills.n, wasKills.n), creatures = minus(run.kills.creatures, wasKills.creatures) }
+  local bosses = tail(run.bosses, type(was.bosses) == "table" and #was.bosses or 0)
+  for _, b in ipairs(bosses) do
+    if b.split then b.split = less(b.split, was.seconds) end
+  end
+  run.bosses = bosses
+  local wasLoot = type(was.loot) == "table" and was.loot or {}
+  local items = {}
+  for key, e in pairs(run.loot.items) do
+    local w = type(wasLoot.items) == "table" and wasLoot.items[key] or nil
+    local n, qty = n0(e.n) - n0(w and w.n), n0(e.qty) - n0(w and w.qty)
+    if n > 0 then items[key] = { n = n, qty = math.max(0, qty), quality = e.quality } end
+  end
+  run.loot = { n = less(run.loot.n, wasLoot.n), qty = less(run.loot.qty, wasLoot.qty),
+    byQuality = minus(run.loot.byQuality, wasLoot.byQuality), items = items }
+  run.coin = less(run.coin, was.coin)
+  run.durability.lost = less(run.durability.lost, type(was.durability) == "table" and was.durability.lost)
+  run.deaths = less(run.deaths, was.deaths)
+  run.quests = tail(run.quests, type(was.quests) == "table" and #was.quests or 0)
+  run.rep = minus(run.rep, was.rep)
+  if type(run.meter) == "table" then
+    local m = type(was.meter) == "table" and was.meter or {}
+    run.meter = { damage = less(run.meter.damage, m.damage), healing = less(run.meter.healing, m.healing),
+      damageTaken = less(run.meter.damageTaken, m.damageTaken) }
+  end
+  if type(run.drops) == "table" then
+    local had = {}
+    for _, d in ipairs(type(was.drops) == "table" and was.drops or {}) do
+      if type(d) == "table" and d.key ~= nil then had[d.key] = true end
+    end
+    local drops = {}
+    for _, d in ipairs(run.drops) do
+      if type(d) ~= "table" or d.key == nil or not had[d.key] then drops[#drops + 1] = d end
+    end
+    run.drops = drops
+  end
+  run.copy, run.otherCopies = nil, nil -- the old copy's: the next corpse says this one's
+  -- `was` closes through the usual door, which empties the store's open run and the corpses seen.
+  local seenN, seenSet = seen.n, seen.set
+  was.bossKills, was.backAt, was.backPullAt = nil, nil, nil
+  close(s, was, was.outsideSince)
+  s.open = run
+  seen.n, seen.set = seenN, seenSet
+  changed("open")
+  ns.Debug("runs: a boss killed before the walk out was pulled again: cut at the walk back in")
 end
 
 -- Where the character is now, against the open run: close what is over, open, pause or resume.
@@ -956,11 +1065,20 @@ function R.OnSystem(msg)
 end
 
 function R.OnEncounterStart(encounterId, name)
-  local run = openRun()
+  local run, s = openRun()
   encounterId = num(encounterId)
   if not on() or not run or not run.insideSince or not encounterId then return end
-  -- A boss this run already killed can be pulled again (a reset without leaving, or an encounter the
-  -- game starts twice): it is listed again, and never ends the run.
+  -- A boss killed before the last walk out, pulled now: a new copy, cut at the walk back in (the header).
+  if type(run.was) == "table" and s then
+    for _, b in ipairs(type(run.was.bosses) == "table" and run.was.bosses or {}) do
+      if type(b) == "table" and b.success and b.encounterId == encounterId then
+        split(s, run)
+        break
+      end
+    end
+  end
+  -- Otherwise a boss this run already killed can be pulled again (a reset without leaving, or an
+  -- encounter the game starts twice): it is listed again, and never ends the run.
   run.pull = { encounterId = encounterId, name = str(name), at = ns.Now() }
   changed()
 end
@@ -990,6 +1108,7 @@ function R.OnCombat(started)
   if started then
     if not run.combatSince then run.combatSince = now end
     if not run.firstPullAt then run.firstPullAt = now end
+    if run.was and not run.backPullAt then run.backPullAt = now end
   else
     stopCombat(run, now)
     ns.After(METER_DELAY, "chronicle runs meter", function() R.HarvestMeter(1) end)
@@ -1348,10 +1467,11 @@ function R.Current()
   local now = ns.Now()
   -- The per-item table (up to 300 rows) isn't part of the view: it is set aside, not copied and dropped,
   -- since the views ask for this after every loot.
-  local items = run.loot.items
-  run.loot.items = nil
+  local items, was = run.loot.items, run.was
+  run.loot.items, run.was = nil, nil
   local view = copy(run)
-  run.loot.items = items
+  run.loot.items, run.was = items, was
+  view.backPullAt = nil
   view.meterSkip, view.meterDone, view.pull = nil, nil, nil
   view.seconds = insideSeconds(run, now)
   view.paused = run.insideSince == nil

@@ -578,6 +578,59 @@ enter(BFD)
 check(#events() == groupBase + 1 and R.Current().id == runB, "a member who can't be read changes nothing")
 _G.UnitGUID, _G.UnitName, mate = guidOf, nameOf, nil
 
+-- The same group, a new copy: only the leader is told of a reset, so a boss killed before the walk out
+-- and pulled after the walk back in cuts the run there (Dalaran, 2026-11-24). ------------------------
+leave()
+fire("CHAT_MSG_SYSTEM", "Blackfathom Deeps has been reset.")
+local cutBase = #events()
+enter(BFD)
+local runC = R.Current().id
+now = now + 100
+fire("ENCOUNTER_START", 11, "Boss 11", 1, 5)
+now = now + 10
+fire("ENCOUNTER_END", 11, "Boss 11", 1, 5, 1)
+R.Kill(3, 90)
+fire("ENCOUNTER_START", 11, "Boss 11", 1, 5)
+now = now + 5
+fire("ENCOUNTER_END", 11, "Boss 11", 1, 5, 0)
+check(#events() == cutBase and R.Current().id == runC and #R.Current().bosses == 2,
+  "a boss pulled again with no walk between is listed again")
+now = now + 50
+leave()
+local leftC = now
+now = now + 83
+enter(BFD)
+local backC = now
+check(#events() == cutBase and R.Current().id == runC and R.Current().entries == 2, "the same group back in resumes")
+check(R.Current().was == nil, "the view never carries the run as it was")
+now = now + 30
+R.Kill(2, 50)
+-- A wipe's walk back in, no boss killed since the last, doesn't move the cut.
+leave()
+now = now + 15
+enter(BFD)
+now = now + 20
+fire("ENCOUNTER_START", 12, "Boss 12", 1, 5)
+now = now + 10
+fire("ENCOUNTER_END", 12, "Boss 12", 1, 5, 1)
+check(#events() == cutBase and R.Current().id == runC, "a boss not killed before changes nothing")
+now = now + 5
+fire("ENCOUNTER_START", 11, "Boss 11", 1, 5)
+local old = lastEvent()
+check(#events() == cutBase + 1 and old.id == runC and old.leftAt == leftC and old.seconds == 165
+  and #old.bosses == 2 and old.kills.n == 3 and old.xp.kills == 90 and old.entries == 1,
+  "a boss killed before the walk out, pulled after it: the old run closes as it walked out")
+cur = R.Current()
+check(cur and cur.id ~= runC and cur.enteredAt == backC and cur.seconds == 65 and cur.entries == 2
+  and cur.kills.n == 2 and cur.xp.kills == 50 and #cur.bosses == 1 and cur.bosses[1].encounterId == 12
+  and cur.bosses[1].split == 60, "and what came since is the new run, entered at the walk back in")
+check(old.was == nil and runs().list[#runs().list].was == nil and runs().open.was == nil,
+  "the run as it was never leaves the open run, and goes at the cut")
+now = now + 10
+fire("ENCOUNTER_END", 11, "Boss 11", 1, 5, 1)
+cur = R.Current()
+check(#events() == cutBase + 1 and #cur.bosses == 2 and cur.bosses[2].split == 75, "and the new run goes on")
+
 -- Secrets in the instance's answer: no run is guessed. -----------------------------------------------
 leave()
 fire("CHAT_MSG_SYSTEM", "Blackfathom Deeps has been reset.")
