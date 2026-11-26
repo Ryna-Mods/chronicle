@@ -18,8 +18,8 @@
 --   /ryna probe group   what the client says of party1 to party4: away, connected, in range, dead,
 --                       role, level, and whether the name and GUID are hidden (never the name)
 --   /ryna probe casts   the next ten casts by party or raid members (UNIT_SPELLCAST_SUCCEEDED)
---   /ryna probe meter   the game's damage meter, every type over the whole session: each source's
---                       class and amount, and whether its name is hidden (after a fight)
+--   /ryna probe meter   the game's damage meter, every type for the last fight: each source's class
+--                       and amount, and whether its name and GUID are hidden (after a fight)
 --   /ryna probe guild   the guild calls this client has, row 1 of the roster as the client orders
 --                       it, what this rank may do, and whether there is a calendar
 --   /ryna probe off     stop watching
@@ -29,7 +29,8 @@
 -- The lines are for a report, so they stay in English whatever the client's language. Nothing here is
 -- recorded on a character, sent to the journal or read by the companion app: the lines live in
 -- RynaDB.chronicle.probe until cleared. comms is the one probe that sends: the word "ping" under
--- the prefix RynaProbe, only when the command is typed. group, casts and meter name nobody: another
+-- the prefix RynaProbe, only when the command is typed, and shows a ping's sender as the game stamped
+-- it, since the form of that name is the question. group, casts and meter need no names: another
 -- player shows as a unit, a class and "plain" or "secret".
 
 local _, ns = ...
@@ -255,16 +256,16 @@ local function ownNames()
   return name, name
 end
 
--- A sender for a report: this character's own name as received, anyone else only as "another player".
+-- A sender for a report, as the game stamped it: its form (hyphen, space, with or without the last
+-- name) is the answer an ownership check stands on, so it is shown whole. Only someone running this
+-- probe sends under its prefix.
 local function sender(v)
   if v == nil then return "nil" end
   if ns.IsSecret(v) then return "secret" end
   local full, short = ownNames()
   v = tostring(v)
-  if full and (v == full or v == short or v:sub(1, #short + 1) == short .. "-") then
-    return v .. " (this character)"
-  end
-  return "another player (plain)"
+  local own = full and (v == full or v == short or v:sub(1, #short) == short)
+  return "\"" .. v .. "\"" .. (own and " (this character)" or "")
 end
 
 local function onComms(_, _, prefix, text, channel, from)
@@ -386,8 +387,11 @@ function P.Casts()
   end
 end
 
--- /ryna probe meter: the game's own damage meter over the whole session (session type 0), one line a
--- meter type, by the client's own list of types where it has one. A source is its class and amount.
+-- /ryna probe meter: the game's own damage meter, one line a meter type, by the client's own list of
+-- types where it has one: the current session (type 1, the last fight), which is what a run adds up,
+-- and for damage done the overall one (type 0), which on Forever held 66 sources for a party of five
+-- (2026-11-26). A source is its class and amount, and whether its name and GUID are hidden: the GUID
+-- is what would tie a source to a party member.
 local METER_SOURCES = 6
 
 function P.Meter()
@@ -410,8 +414,16 @@ function P.Meter()
     for id = 0, 10 do types[#types + 1] = { name = "type", id = id } end
   end
   table.sort(types, function(a, b) return a.id < b.id end)
+  local overall = first2("C_DamageMeter", "GetCombatSessionFromType", 0, 0)
+  if type(overall) == "table" and not ns.IsSecret(overall) and type(overall.combatSources) == "table"
+    and not ns.IsSecret(overall.combatSources) then
+    say(string.format("meter: overall damage done: %d sources, %s seconds", #overall.combatSources,
+      show(overall.durationSeconds)))
+  else
+    say("meter: overall damage done: " .. show(overall))
+  end
   for _, t in ipairs(types) do
-    local s = first2("C_DamageMeter", "GetCombatSessionFromType", 0, t.id)
+    local s = first2("C_DamageMeter", "GetCombatSessionFromType", 1, t.id)
     if type(s) ~= "table" or ns.IsSecret(s) then
       say(string.format("meter: %s (%d): %s", t.name, t.id, show(s)))
     else
@@ -423,7 +435,7 @@ function P.Meter()
           if type(c) == "table" and not ns.IsSecret(c) then
             local you = not ns.IsSecret(c.isLocalPlayer) and c.isLocalPlayer == true
             parts[#parts + 1] = show(c.classFilename) .. " " .. show(c.totalAmount)
-              .. (you and " (you)" or "") .. ", name " .. hidden(c.name)
+              .. (you and " (you)" or "") .. ", name " .. hidden(c.name) .. ", guid " .. hidden(c.sourceGUID)
           end
         end
         if #sources > METER_SOURCES then

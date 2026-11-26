@@ -313,11 +313,13 @@ check(said("comms: sent guild: error: ") and said("refused in a test"), "a refus
 check(said("comms: not tried (not in one): raid"), "a channel it isn't in is named")
 chat = {}
 F.Fire("CHAT_MSG_ADDON", "RynaProbe", "ping whisper", "WHISPER", "Maddie-Markham")
-check(said("CHAT_MSG_ADDON: ping whisper | WHISPER | from Maddie-Markham (this character)"),
+check(said('CHAT_MSG_ADDON: ping whisper | WHISPER | from "Maddie-Markham" (this character)'),
   "a ping that arrives, with its own sender whole")
+F.Fire("CHAT_MSG_ADDON", "RynaProbe", "ping guild", "GUILD", "Maddie Markham")
+check(said('| GUILD | from "Maddie Markham" (this character)'), "its own name in another form is still its own")
 F.Fire("CHAT_MSG_ADDON", "RynaProbe", "ping party", "PARTY", "Thorbrand-Ironfoot")
-check(said("CHAT_MSG_ADDON: ping party | PARTY | from another player (plain)") and not said("Thorbrand"),
-  "someone else's ping never names them")
+check(said('CHAT_MSG_ADDON: ping party | PARTY | from "Thorbrand-Ironfoot"') and not said("Ironfoot\" (this"),
+  "another prober's ping shows its sender as stamped")
 F.Fire("CHAT_MSG_ADDON", "RynaProbe", "ping party", "PARTY", SECRET)
 check(said("| PARTY | from secret"), "a hidden sender is named as hidden")
 chat = {}
@@ -385,20 +387,22 @@ _G.C_DamageMeter = {
   IsDamageMeterAvailable = function() return true end,
   GetAvailableCombatSessions = function() return { {}, {} } end,
   GetCombatSessionFromType = function(session, meter)
-    if session ~= 0 then return nil end
+    if session == 0 then return { durationSeconds = 812, combatSources = { {}, {}, {} } } end
     if meter == 2 then return SECRET end
     return { totalAmount = 900, combatSources = {
-      { name = "Maddie", classFilename = "PRIEST", totalAmount = 300, isLocalPlayer = true },
-      { name = SECRET, classFilename = "WARRIOR", totalAmount = SECRET, isLocalPlayer = SECRET },
+      { name = "Maddie", sourceGUID = "Player-1-2", classFilename = "PRIEST", totalAmount = 300, isLocalPlayer = true },
+      { name = SECRET, sourceGUID = SECRET, classFilename = "WARRIOR", totalAmount = SECRET, isLocalPlayer = SECRET },
     } }
   end,
 }
 commands.probe.run("meter")
 check(said("meter: available true; in combat false") and said("meter: sessions 2"), "the meter and its sessions")
-check(said("meter: DamageDone (0): total 900: PRIEST 300 (you), name plain; WARRIOR secret, name secret"),
-  "a type's sources: class, amount, and whether the name is hidden")
+check(said("meter: overall damage done: 3 sources, 812 seconds"), "how many the overall session holds")
+check(said("meter: DamageDone (0): total 900: PRIEST 300 (you), name plain, guid plain; "
+  .. "WARRIOR secret, name secret, guid secret"),
+  "the last fight's sources: class, amount, and whether the name and GUID are hidden")
 check(said("meter: HealingDone (2): secret"), "a hidden session is named as hidden")
-check(not said("Maddie,") and not said("name Maddie"), "no name in a meter line")
+check(not said("name Maddie") and not said("Player-1-2"), "no name and no GUID in a meter line")
 _G.Enum = nil
 chat = {}
 commands.probe.run("meter")
