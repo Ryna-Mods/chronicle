@@ -661,6 +661,24 @@ ns.On("PLAYER_LOGIN", function()
   end
 end)
 
-ns.API.Slash.Add({ word = "probe", order = 90, run = command,
+-- `label` and `menu` are for the minimap button's Commands menu (cores after 0.5.3; an older one
+-- ignores them). Like the probes' own lines, the words are not translated: they are read in a report.
+ns.API.Slash.Add({ word = "probe", order = 90, run = command, label = "Probes",
+  menu = {
+    { label = "What the client answers here", arg = "now" },
+    { label = "Watch (keeps probing as you play)", arg = "watch", checked = function()
+      local s = store()
+      return s and s.watch and true or false
+    end },
+    { label = "Stop watching", arg = "off" },
+    { label = "Loot", arg = "loot" },
+    { label = "Addon messages", arg = "comms" },
+    { label = "Group", arg = "group" },
+    { label = "Casts", arg = "casts" },
+    { label = "Damage meter", arg = "meter" },
+    { label = "Guild", arg = "guild" },
+    { label = "Show what was kept", arg = "show" },
+    { label = "Clear what was kept", arg = "clear" },
+  },
   help = "/ryna probe: what the client answers here (for a report); /ryna probe "
     .. "watch||off||loot||comms||group||casts||meter||guild||show||clear" })
